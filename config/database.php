@@ -84,6 +84,25 @@ return [
             ]) : [],
         ],
 
+        'kamailio' => [
+            'driver' => 'mariadb',
+            'host' => env('KAMAILIO_DB_HOST', '127.0.0.1'),
+            'port' => env('KAMAILIO_DB_PORT', '3306'),
+            'database' => env('KAMAILIO_DB_DATABASE', 'kamailio'),
+            'username' => env('KAMAILIO_DB_USERNAME'),
+            'password' => env('KAMAILIO_DB_PASSWORD'),
+            'unix_socket' => env('KAMAILIO_DB_SOCKET', ''),
+            'charset' => 'latin1',
+            'collation' => 'latin1_swedish_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                Mysql::ATTR_SSL_CA => env('KAMAILIO_DB_SSL_CA'),
+            ]) : [],
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DB_URL'),

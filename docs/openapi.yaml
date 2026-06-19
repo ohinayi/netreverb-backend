@@ -1,0 +1,858 @@
+openapi: 3.1.0
+info:
+  title: NetReverb API
+  version: 1.0.0
+  description: |
+    Multi-tenant communication control-plane API. Application authentication
+    and SIP credentials are separate. SIP passwords are returned only when an
+    extension is created or its credential is rotated.
+servers:
+  - url: /api/v1
+    description: Current host
+tags:
+  - name: Authentication
+  - name: Organizations
+  - name: Extensions
+  - name: Service Numbers
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      operationId: register
+      summary: Register an email-based account and personal workspace
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registered; email verification is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Create a bearer token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /auth/logout:
+    delete:
+      tags: [Authentication]
+      operationId: logout
+      summary: Revoke the current bearer token
+      responses:
+        '204':
+          description: Logged out
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /me:
+    get:
+      tags: [Authentication]
+      operationId: currentUser
+      summary: Get the current user and assigned extensions
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /email/verification-notification:
+    post:
+      tags: [Authentication]
+      operationId: resendEmailVerification
+      summary: Queue another verification email when required
+      responses:
+        '200':
+          description: Generic response that does not disclose extra state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /email/verify/{id}/{hash}:
+    get:
+      tags: [Authentication]
+      operationId: verifyEmail
+      summary: Verify email using the signed link delivered by Laravel
+      description: The URL also includes signed `expires` and `signature` query parameters.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: expires
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: signature
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verified when JSON is requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '302':
+          description: Browser redirect to the frontend verification result
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: List organizations visible to the current verified user
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated organizations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationCollection'
+        '403':
+          $ref: '#/components/responses/EmailNotVerified'
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Create an organization and owner membership
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationWrite'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organizations]
+      operationId: getOrganization
+      summary: Get an organization
+      responses:
+        '200':
+          description: Organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Organizations]
+      operationId: updateOrganization
+      summary: Update an organization as owner or admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationWrite'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/extensions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Extensions]
+      operationId: listExtensions
+      summary: List organization extensions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated extensions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtensionCollection'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Extensions]
+      operationId: createExtension
+      summary: Create and queue an extension for Kamailio provisioning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtensionCreate'
+      responses:
+        '201':
+          description: Created; `meta.sip_password` is returned once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtensionCreatedResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/extensions/{extension}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExtensionId'
+    get:
+      tags: [Extensions]
+      operationId: getExtension
+      summary: Get an extension
+      responses:
+        '200':
+          description: Extension
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtensionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Extensions]
+      operationId: updateExtension
+      summary: Update assignment, type, display name or lifecycle state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtensionUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtensionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Extensions]
+      operationId: deleteExtension
+      summary: Disable and queue subscriber removal
+      responses:
+        '204':
+          description: Deletion accepted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /organizations/{organization}/extensions/{extension}/credentials/rotate:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExtensionId'
+    post:
+      tags: [Extensions]
+      operationId: rotateSipCredential
+      summary: Rotate the credential and return the new password once
+      responses:
+        '200':
+          description: Credential rotated and provisioning queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipCredentialResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/service-numbers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Service Numbers]
+      operationId: listServiceNumbers
+      summary: List desired service-number routes
+      responses:
+        '200':
+          description: Paginated service numbers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceNumberCollection'
+    post:
+      tags: [Service Numbers]
+      operationId: createServiceNumber
+      summary: Create a desired service-number route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceNumberCreate'
+      responses:
+        '201':
+          description: Created in pending provisioning state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceNumberResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/service-numbers/{serviceNumber}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ServiceNumberId'
+    get:
+      tags: [Service Numbers]
+      operationId: getServiceNumber
+      summary: Get a service number
+      responses:
+        '200':
+          description: Service number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceNumberResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Service Numbers]
+      operationId: updateServiceNumber
+      summary: Update desired service routing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceNumberUpdate'
+      responses:
+        '200':
+          description: Updated in pending provisioning state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceNumberResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Service Numbers]
+      operationId: deleteServiceNumber
+      summary: Disable and remove desired service routing
+      responses:
+        '204':
+          description: Deleted
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+    OrganizationId:
+      name: organization
+      in: path
+      required: true
+      description: Organization ULID
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    ExtensionId:
+      name: extension
+      in: path
+      required: true
+      description: Extension ULID
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    ServiceNumberId:
+      name: serviceNumber
+      in: path
+      required: true
+      description: Service-number ULID
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+  responses:
+    Unauthenticated:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+    EmailNotVerified:
+      description: Email verification is required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+    NotFound:
+      description: Resource not found or hidden by tenant scoping
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - name
+        - email
+        - password
+        - password_confirmation
+        - country_code
+        - timezone
+        - locale
+        - terms_accepted
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+        password_confirmation:
+          type: string
+          format: password
+        country_code:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          example: NG
+        timezone:
+          type: string
+          example: Africa/Lagos
+        locale:
+          type: string
+          example: en
+        terms_accepted:
+          type: boolean
+          const: true
+        device_name:
+          type: string
+          example: Chrome on Linux
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        device_name:
+          type: string
+    AuthResponse:
+      type: object
+      required: [data, token, token_type]
+      properties:
+        data:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+          description: Sanctum token shown once
+        token_type:
+          type: string
+          const: Bearer
+    User:
+      type: object
+      required: [id, name, email, email_verified, timezone, locale]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        email_verified:
+          type: boolean
+        country_code:
+          type: [string, 'null']
+        timezone:
+          type: string
+        locale:
+          type: string
+        extensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Extension'
+        created_at:
+          type: string
+          format: date-time
+    OrganizationWrite:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 100
+        timezone:
+          type: string
+        locale:
+          type: string
+        settings:
+          type: [object, 'null']
+          additionalProperties: true
+    Organization:
+      type: object
+      required: [id, name, slug, status, timezone, locale]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, closed]
+        timezone:
+          type: string
+        locale:
+          type: string
+        settings:
+          type: [object, 'null']
+        members_count:
+          type: integer
+        extensions_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ExtensionCreate:
+      type: object
+      required: [number, display_name, type]
+      properties:
+        number:
+          type: string
+          pattern: '^[0-9]{2,15}$'
+        display_name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ExtensionType'
+        user_public_id:
+          type: [string, 'null']
+    ExtensionUpdate:
+      type: object
+      properties:
+        display_name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ExtensionType'
+        status:
+          type: string
+          enum: [active, suspended, disabled]
+        user_public_id:
+          type: [string, 'null']
+    ExtensionType:
+      type: string
+      enum: [user, room, queue, assistant, device]
+    Extension:
+      type: object
+      required: [id, number, realm, sip_uri, display_name, type, status]
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        realm:
+          type: string
+        sip_uri:
+          type: string
+        display_name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ExtensionType'
+        status:
+          type: string
+          enum: [pending, active, suspended, disabled]
+        user_id:
+          type: [string, 'null']
+        provisioning:
+          $ref: '#/components/schemas/ProvisioningState'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProvisioningState:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, processing, active, failed, disabled]
+        desired_revision:
+          type: integer
+        applied_revision:
+          type: integer
+        provisioned_at:
+          type: [string, 'null']
+          format: date-time
+    ServiceNumberCreate:
+      type: object
+      required: [number, name, type, target]
+      properties:
+        number:
+          type: string
+          pattern: '^[0-9]{2,15}$'
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ServiceNumberType'
+        target:
+          type: string
+        enabled:
+          type: boolean
+        configuration:
+          type: [object, 'null']
+    ServiceNumberUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ServiceNumberType'
+        target:
+          type: string
+        enabled:
+          type: boolean
+        configuration:
+          type: [object, 'null']
+    ServiceNumberType:
+      type: string
+      enum: [echo, conference, voicemail, assistant, custom]
+    ServiceNumber:
+      type: object
+      required: [id, number, realm, name, type, target, enabled, provisioning_status]
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        realm:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ServiceNumberType'
+        target:
+          type: string
+        enabled:
+          type: boolean
+        provisioning_status:
+          type: string
+          enum: [pending, processing, active, failed, disabled]
+        configuration:
+          type: [object, 'null']
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    PaginationLinks:
+      type: object
+      additionalProperties: true
+    PaginationMeta:
+      type: object
+      additionalProperties: true
+    OrganizationResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Organization'
+    OrganizationCollection:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Organization'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    ExtensionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Extension'
+    ExtensionCreatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/ExtensionResponse'
+        - type: object
+          required: [meta]
+          properties:
+            meta:
+              type: object
+              required: [sip_password, display_once]
+              properties:
+                sip_password:
+                  type: string
+                display_once:
+                  type: boolean
+                  const: true
+    ExtensionCollection:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Extension'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    SipCredentialResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [sip_password, display_once]
+          properties:
+            sip_password:
+              type: string
+            display_once:
+              type: boolean
+              const: true
+    ServiceNumberResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/ServiceNumber'
+    ServiceNumberCollection:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceNumber'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+security:
+  - bearerAuth: []

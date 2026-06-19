@@ -1,0 +1,74 @@
+<?php
+
+namespace App\Http\Requests\Api\V1;
+
+use App\Enums\ExtensionStatus;
+use App\Enums\ExtensionType;
+use App\Enums\MembershipStatus;
+use App\Models\Organization;
+use App\Models\OrganizationMembership;
+use App\Models\User;
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
+
+class UpdateExtensionRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /** @return array<string, ValidationRule|array<mixed>|string> */
+    public function rules(): array
+    {
+        return [
+            'display_name' => ['sometimes', 'string', 'min:2', 'max:120'],
+            'type' => ['sometimes', Rule::enum(ExtensionType::class)],
+            'status' => [
+                'sometimes',
+                Rule::in([
+                    ExtensionStatus::Active->value,
+                    ExtensionStatus::Suspended->value,
+                    ExtensionStatus::Disabled->value,
+                ]),
+            ],
+            'user_public_id' => [
+                'sometimes',
+                'nullable',
+                'string',
+                Rule::exists((new User)->getTable(), 'public_id'),
+            ],
+        ];
+    }
+
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            if (! $this->filled('user_public_id')) {
+                return;
+            }
+
+            $organization = $this->route('organization');
+            $user = User::query()->where('public_id', $this->string('user_public_id'))->first();
+
+            if (! $organization instanceof Organization || $user === null) {
+                return;
+            }
+
+            $isMember = OrganizationMembership::query()
+                ->whereBelongsTo($organization)
+                ->whereBelongsTo($user)
+                ->where('status', MembershipStatus::Active->value)
+                ->exists();
+
+            if (! $isMember) {
+                $validator->errors()->add(
+                    'user_public_id',
+                    'The selected user is not an active member of this organization.',
+                );
+            }
+        }];
+    }
+}

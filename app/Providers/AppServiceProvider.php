@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Contracts\Telephony\SipSubscriberGateway;
+use App\Services\Telephony\DatabaseSipSubscriberGateway;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +14,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(SipSubscriberGateway::class, DatabaseSipSubscriberGateway::class);
     }
 
     /**
@@ -19,6 +22,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Model::shouldBeStrict(! app()->isProduction());
     }
 }

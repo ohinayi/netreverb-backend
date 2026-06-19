@@ -40,9 +40,10 @@ This proves the core call path, but it is not yet a production SaaS platform.
 Tenant isolation, repeatable provisioning, observability, abuse controls,
 backups, failover, and automated tests remain product requirements.
 
-The repository currently contains a fresh Laravel application. Although the
-original plan names Laravel 12, `composer.json` currently uses Laravel 13.8.
-The team should standardize on the repository version before implementation.
+The repository currently contains a fresh Laravel application. Laravel 13 is
+the committed backend version; the installed framework version at the time of
+this blueprint is `13.16.1`. New backend work must follow Laravel 13 APIs and
+runtime requirements.
 
 Do not publish infrastructure IP addresses, management ports, database access,
 or SIP credentials in investor material. The domain and capabilities are
@@ -96,6 +97,33 @@ Caller -> Kamailio -> FreeSWITCH -> Voice Gateway -> STT
                                              -> AI/RAG API -> tenant knowledge
                                              -> TTS -> FreeSWITCH -> Caller
 ```
+
+The voice session contract is:
+
+1. Laravel creates the assistant, assigns it a callable extension/service
+   number, and stores the tenant's knowledge sources and routing policy.
+2. Kamailio routes a call to that number into the correct FreeSWITCH context.
+3. At call start, FreeSWITCH or the voice gateway requests a short-lived,
+   signed session token from Laravel. The token identifies the organization,
+   assistant, call, permitted operations, and expiry.
+4. FreeSWITCH streams call audio to the voice gateway over a media socket or
+   supported streaming module. It does not send individual audio frames through
+   Laravel.
+5. The gateway performs speech-to-text and sends the transcript plus authorized
+   assistant context to the RAG service.
+6. RAG retrieves only documents matching the token's organization and knowledge
+   base, then returns an answer with source identifiers.
+7. The gateway converts the answer to speech and streams it to FreeSWITCH.
+8. Session summaries and interaction events are sent asynchronously to Laravel
+   for history, analytics, feedback, and later usage accounting.
+
+For text chat, React calls Laravel, Laravel authorizes the tenant and assistant,
+and then calls the same RAG service. This makes the knowledge and answer logic
+reusable for both text and voice while keeping SIP and media independent.
+
+Laravel is therefore the **control and authorization layer**, RAG is the
+**knowledge and answer layer**, the voice gateway is the **real-time speech
+layer**, and FreeSWITCH is the **telephony application and audio bridge**.
 
 Store the question, retrieved document identifiers, generated answer, latency,
 model/version, token or audio usage, outcome, and optional user feedback. Do
@@ -217,6 +245,27 @@ configuration. If plaintext is operationally unavoidable, encrypt it at rest,
 restrict access, rotate it, and never return it after initial issuance. Decide
 the credential representation together with the deployed Kamailio `auth_db`
 configuration before writing migrations.
+
+### Confirmed initial Kamailio authentication contract
+
+The supplied Kamailio configuration uses `auth_db`, the `subscriber` table,
+`calculate_ha1=yes`, and `password_column=password`. The authentication realm is
+hard-coded as `sip.classyra.com.ng`. Consequently, the initial provisioning
+adapter must project `username`, `domain=sip.classyra.com.ng`, and the generated
+plaintext SIP password into `subscriber`; Kamailio calculates the digest during
+authentication. Laravel must encrypt the recoverable credential in its own
+database, reveal it only on creation/rotation, and keep it out of logs.
+
+Before production, prefer changing Kamailio to authenticate using precomputed
+HA1 material so its subscriber projection does not require plaintext secrets.
+That change must be tested against every supported SIP/WebRTC client and the
+exact installed Kamailio schema.
+
+Only one subscriber row per `username + realm` should exist. The existing test
+data contains the same usernames under `classyra.com.ng` and
+`sip.classyra.com.ng`; NetReverb will provision only the configured SIP realm.
+Confirm `auth_db` domain matching and the subscriber unique index with
+`SHOW CREATE TABLE subscriber` before enabling the production adapter.
 
 ## 7. Configurable Service Numbers
 
@@ -444,26 +493,37 @@ issuance, or event ingestion can still damage the product experience.
 
 ## 13. Immediate Engineering Backlog
 
-1. Decide Laravel 13 versus Laravel 12 and document supported runtime versions.
+1. Keep Laravel 13 and record PHP/runtime support in deployment documentation.
 2. Capture sanitized, reproducible telecom configuration and a staging topology.
-3. Finalize the tenant, user, membership, extension, and SIP credential rules.
-4. Confirm Kamailio `subscriber` schema and digest storage mode.
-5. Agree extension allocation scope: globally unique or unique per SIP realm.
-6. Implement Phase 1 migrations, models, policies, APIs, and tenant isolation
+3. Confirm Kamailio `subscriber` schema and digest storage mode.
+4. Adopt the initial identity defaults below and record changes as decisions.
+5. Implement Phase 1 migrations, models, policies, APIs, and tenant isolation
    tests.
-7. Implement the transactional provisioning outbox and a fake Kamailio adapter
+6. Implement the transactional provisioning outbox and a fake Kamailio adapter
    before connecting staging.
-8. Add real Kamailio projection, reconciliation, and end-to-end SIP tests.
-9. Implement configurable service numbers and staged config deployment.
-10. Add CDR event ingestion before dashboard call-history work.
+7. Add real Kamailio projection, reconciliation, and end-to-end SIP tests.
+8. Implement configurable service numbers and staged config deployment.
+9. Add CDR event ingestion before dashboard call-history work.
+10. Design the AI service contracts after the core call lifecycle is reliable;
+    implement RAG in Phase 7.
 
-## 14. Product Decisions Needed Before Development
+### Initial implementation defaults
 
-- Whether a human can belong to multiple organizations
-- Whether extension numbers are global, per organization, or per SIP realm
-- Whether direct calls always anchor media for recording/security consistency
-- Required clients at launch: browser, Android, iOS, or third-party softphones
-- Whether MVP meetings require video and screen sharing or audio only
+To begin development without leaving foundational constraints ambiguous:
+
+- A user may belong to multiple organizations through memberships.
+- Extensions are globally unique within the initial SIP realm
+  `sip.classyra.com.ng`; keep `organization_id` on every extension.
+- Browser and third-party SIP clients such as Zoiper are the first clients.
+- Internal calls are RTPengine-anchored for consistent NAT and media policy.
+- Meetings launch audio-first; video/SFU work remains a separate milestone.
+- Echo `459666` and conference `45000` are seeded service numbers, not constants.
+- Recording is disabled by default until tenant consent and retention rules are
+  configured.
+- Billing and SIP trunks have schemas and interfaces but disabled feature flags.
+
+## 14. Product Decisions Needed Before Their Feature Phases
+
 - Recording consent and default retention policy
 - Regions and regulated customer types supported at launch
 - AI model/embedding provider, data residency, and whether tenant data may leave
