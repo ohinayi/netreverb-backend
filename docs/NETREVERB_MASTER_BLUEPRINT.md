@@ -10,9 +10,10 @@ and organization-specific AI assistants.
 The initial product must support internal communication without depending on a
 carrier:
 
-- SIP extension-to-extension voice calls
-- Browser and mobile WebRTC calls
-- One-to-one chat and group chat
+- SIP extension-to-extension audio calls
+- One-to-one WebRTC audio and video calls
+- One-to-one chat and group chat with replies, reactions, files, images and
+  voice notes
 - Audio/video meetings with rooms and invitations
 - Organization and extension administration
 - Call detail records, presence, recordings, and audit history
@@ -55,7 +56,7 @@ sufficient for external presentations.
 
 Laravel is the system of record for organizations, users, extensions,
 permissions, configuration, provisioning status, meetings, AI configuration,
-CDRs, recordings metadata, subscriptions, and future billing. React consumes
+CDRs, recordings metadata, subscriptions, and future billing. Vue consumes
 versioned Laravel APIs. Redis supports queues, cache, presence fan-out, and
 rate limiting.
 
@@ -77,9 +78,17 @@ administration and CDR ingestion, but established calls should continue.
 
 Messaging and application presence use a WebSocket event service backed by
 Redis. SIP signalling is not the chat transport. Messages are persisted in the
-application database before events are broadcast. Meeting video requires an
-SFU such as LiveKit, Janus, or mediasoup; a FreeSWITCH audio conference alone is
-not a scalable Zoom-equivalent video architecture.
+application database before events are broadcast. Binary media such as images,
+documents and voice notes is stored in encrypted S3-compatible object storage;
+MariaDB stores ownership, object keys, MIME type, size, checksum, duration and
+retention metadata. Meeting video requires an SFU such as LiveKit, Janus, or
+mediasoup; a FreeSWITCH audio conference alone is not a scalable Zoom-equivalent
+video architecture.
+
+One-to-one calls support an explicit `audio` or `video` media mode. Kamailio
+routes the WebRTC/SIP session and RTPengine anchors/interworks supported media.
+FreeSWITCH remains responsible for telephony applications and audio mixing.
+Group video, active-speaker selection, simulcast and screen sharing use the SFU.
 
 ### AI plane
 
@@ -117,7 +126,7 @@ The voice session contract is:
 8. Session summaries and interaction events are sent asynchronously to Laravel
    for history, analytics, feedback, and later usage accounting.
 
-For text chat, React calls Laravel, Laravel authorizes the tenant and assistant,
+For text chat, Vue calls Laravel, Laravel authorizes the tenant and assistant,
 and then calls the same RAG service. This makes the knowledge and answer logic
 reusable for both text and voice while keeping SIP and media independent.
 
@@ -174,7 +183,7 @@ Recommended core tables:
 | Table | Purpose |
 | --- | --- |
 | `organizations` | Tenant profile, status, locale, retention settings |
-| `organization_user` | Membership, role, lifecycle state |
+| `organization_memberships` | Membership, role, lifecycle state |
 | `users` | Human authentication identity |
 | `extensions` | Tenant-owned callable number and assignment |
 | `sip_credentials` | Auth username, realm, encrypted/hashed credential material |
@@ -183,12 +192,16 @@ Recommended core tables:
 | `service_numbers` | Configurable echo, conference, voicemail, AI, and test routes |
 | `conversations` | Direct/group chat container |
 | `conversation_members` | Conversation membership and read state |
-| `messages` | Durable chat messages with idempotency key |
+| `messages` | Durable text/system message, reply/edit/delete and idempotency state |
+| `message_attachments` | File/image/voice-note object metadata and scan state |
+| `message_receipts` | Per-user delivered/read timestamps |
+| `message_reactions` | Per-user emoji reactions |
 | `meetings` | Scheduled/ad-hoc meeting metadata |
 | `meeting_participants` | Invitations, roles, join/leave history |
 | `conference_rooms` | FreeSWITCH/SFU room mapping and access policy |
-| `calls` | Logical call and tenant ownership |
-| `call_legs` | Per-leg SIP identifiers, direction, endpoints, timing, result |
+| `calls` | Logical call, tenant ownership and audio/video media mode |
+| `call_participants` | User/device participants and join/leave state |
+| `call_legs` | Per-leg SIP identifiers, direction, endpoints, media and result |
 | `call_events` | Normalized append-only call lifecycle events |
 | `recordings` | Object key, encryption, duration, consent and retention metadata |
 | `webhook_endpoints` | Tenant callback configuration |
@@ -215,6 +228,50 @@ Reserve these deferred tables without activating workflows:
 Every tenant-owned table must carry `organization_id`, use scoped unique
 indexes, and be accessed through tenant-aware policies. Sequential database IDs
 should not be exposed as public API identifiers; use UUIDv7/ULID public IDs.
+
+### Messaging and media storage contract
+
+The messaging module supports direct and group conversations, text, replies,
+edits, soft deletion, reactions, delivery/read receipts, images, documents and
+voice notes.
+
+```text
+Client requests upload authorization from Laravel
+    -> client uploads encrypted transport to object storage
+    -> malware/content validation completes
+    -> Laravel commits message + attachment metadata
+    -> realtime event broadcasts the committed message
+```
+
+Do not store file or voice-note binary data in MariaDB. Use private object
+storage, short-lived signed upload/download URLs, server-verified checksums,
+MIME/extension validation, size/duration limits, malware scanning and tenant
+retention jobs. A voice note is an attachment with audio codec, duration and
+optional waveform/transcription metadata.
+
+Transport TLS and encryption at rest do not equal WhatsApp-style end-to-end
+encryption. If E2EE is required, use a separately reviewed, audited protocol
+such as the Signal protocol and design multi-device keys, backup, recovery,
+search, moderation, compliance export and AI access around it. NetReverb must
+not claim E2EE until clients, key management and independent security review
+actually provide it.
+
+### Audio and video call contract
+
+Every call declares `media_mode=audio|video` and allowed media capabilities.
+Users may start audio-only, start video, or upgrade/downgrade during a call
+through a negotiated re-INVITE/session update. Authorization, call history and
+CDRs remain in Laravel; SIP signalling remains in Kamailio; media never flows
+through Laravel.
+
+- One-to-one audio: WebRTC/SIP through Kamailio and RTPengine as required.
+- One-to-one video: WebRTC video through Kamailio/RTPengine with an agreed codec
+  policy; FreeSWITCH is used only when call applications require it.
+- Group audio: FreeSWITCH conference or the selected SFU audio path.
+- Group video/meetings: SFU for forwarding, simulcast, active speaker and screen
+  sharing; do not mesh every participant peer-to-peer.
+- Recording: explicit consent and separate audio/video recording metadata,
+  encrypted object storage and retention.
 
 ## 6. SIP Provisioning Contract
 
@@ -300,6 +357,19 @@ alias to avoid breaking configured clients.
    FreeSWITCH; a simple direct internal call may be proxy-routed according to
    the final media policy.
 6. SIP/FreeSWITCH events are normalized into calls and call legs asynchronously.
+
+### One-to-one audio/video call
+
+1. Caller selects audio or video and the client requests call authorization.
+2. Laravel returns permitted identities/capabilities without joining the media
+   path.
+3. Kamailio routes signalling and RTPengine applies the negotiated RTP/WebRTC
+   policy.
+4. Both clients negotiate microphone and, for video, camera codecs/tracks.
+5. A mid-call video upgrade is accepted only when both policy and endpoints
+   support it.
+6. Call events record requested/negotiated media mode, without storing RTP in
+   Laravel.
 
 ### Meeting
 
@@ -397,16 +467,23 @@ duplicate events cannot duplicate usage or call records.
 ### Phase 4: Messaging and presence (3-4 weeks)
 
 - Direct/group conversations, durable messages, attachments, delivery/read
-  receipts, application presence, and push notification hooks.
+  receipts, replies, edits, soft deletion, reactions, application presence, and
+  push notification hooks.
+- Image/document sharing with private object storage, signed transfers,
+  checksum, validation, malware scanning, quotas and retention.
+- Voice notes with codec/duration limits, waveform metadata, background upload
+  recovery and optional later transcription.
 - Redis-backed broadcast infrastructure and offline synchronization cursor.
 - Abuse controls, attachment scanning, deletion/retention, and moderation audit.
 
 **Exit:** multi-device delivery and reconnection do not lose or duplicate
 messages; tenant and conversation access tests pass.
 
-### Phase 5: Meetings (3-5 weeks)
+### Phase 5: Video calling and meetings (3-5 weeks)
 
 - Select and deploy an SFU through a short proof of concept and load test.
+- Complete one-to-one audio/video calling, camera/microphone switching and
+  negotiated audio-to-video upgrades.
 - Meeting rooms, invitations, roles, expiring join tokens, waiting room,
   mute/remove controls, screen sharing, and meeting chat.
 - Bridge SIP/FreeSWITCH audio only where required.
@@ -516,7 +593,8 @@ To begin development without leaving foundational constraints ambiguous:
   `sip.classyra.com.ng`; keep `organization_id` on every extension.
 - Browser and third-party SIP clients such as Zoiper are the first clients.
 - Internal calls are RTPengine-anchored for consistent NAT and media policy.
-- Meetings launch audio-first; video/SFU work remains a separate milestone.
+- One-to-one calls support audio and video; audio ships first as the stability
+  baseline, while group video/SFU work remains a separate measured milestone.
 - Echo `459666` and conference `45000` are seeded service numbers, not constants.
 - Recording is disabled by default until tenant consent and retention rules are
   configured.

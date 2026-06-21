@@ -9,6 +9,7 @@ use App\Models\OrganizationMembership;
 use App\Models\User;
 use App\Notifications\VerifyEmailNotification;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
@@ -71,6 +72,25 @@ class AuthenticationApiTest extends TestCase
         $this->assertSame('100000', $extension->dialableNumber->number);
         $this->assertSame($user->id, $extension->user_id);
         Queue::assertPushed(ProvisionSipSubscriber::class, 1);
+    }
+
+    public function test_verification_email_opens_the_frontend_with_a_signed_backend_url(): void
+    {
+        $user = User::factory()->unverified()->create();
+        $mail = (new VerifyEmailNotification)->toMail($user);
+
+        $this->assertStringStartsWith(
+            'http://localhost:5174/auth/verify-email?',
+            $mail->actionUrl,
+        );
+
+        parse_str((string) parse_url($mail->actionUrl, PHP_URL_QUERY), $query);
+        $this->assertArrayHasKey('verification_url', $query);
+        $this->assertStringStartsWith(
+            'http://localhost:8000/api/v1/email/verify/',
+            $query['verification_url'],
+        );
+        $this->assertTrue(URL::hasValidSignature(Request::create($query['verification_url'])));
     }
 
     public function test_invalid_login_uses_a_generic_error_and_valid_login_returns_a_token(): void

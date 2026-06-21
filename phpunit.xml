@@ -19,6 +19,8 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_URL" value="http://localhost:8000"/>
+        <env name="FRONTEND_URL" value="http://localhost:5174"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="API_DOCS_ENABLED" value="true"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

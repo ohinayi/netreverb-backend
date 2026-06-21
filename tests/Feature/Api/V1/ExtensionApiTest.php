@@ -121,6 +121,68 @@ class ExtensionApiTest extends TestCase
         )->assertNotFound();
     }
 
+    public function test_member_only_lists_their_assigned_extensions(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $otherMember = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($otherMember)->create();
+        $assignedExtension = Extension::factory()->for($organization)->for($member)->create();
+        $otherExtension = Extension::factory()->for($organization)->for($otherMember)->create();
+        Sanctum::actingAs($member);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/extensions")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $assignedExtension->public_id)
+            ->assertJsonMissing(['id' => $otherExtension->public_id]);
+    }
+
+    public function test_member_cannot_view_another_members_extension(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $otherMember = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($otherMember)->create();
+        $otherExtension = Extension::factory()->for($organization)->for($otherMember)->create();
+        Sanctum::actingAs($member);
+
+        $this->getJson(
+            "/api/v1/organizations/{$organization->public_id}/extensions/{$otherExtension->public_id}",
+        )->assertForbidden();
+    }
+
+    public function test_assigned_member_can_get_their_automatic_sip_registration_settings(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $extension = Extension::factory()->for($organization)->for($member)->create();
+        $extension->credential()->create(['password' => 'encrypted-sip-secret']);
+        $extension->provisioningState()->create();
+        Sanctum::actingAs($member);
+
+        $this->getJson(
+            "/api/v1/organizations/{$organization->public_id}/extensions/{$extension->public_id}/sip-registration",
+        )->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.extension_id', $extension->public_id)
+            ->assertJsonPath('data.username', $extension->dialableNumber->number)
+            ->assertJsonPath('data.password', 'encrypted-sip-secret')
+            ->assertJsonPath('data.secure_websocket_url', 'wss://sip.classyra.com.ng:7443');
+    }
+
+    public function test_even_an_admin_cannot_read_another_users_existing_sip_password(): void
+    {
+        [$admin, $organization] = $this->organizationWithUser(MembershipRole::Admin);
+        $member = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($member)->create();
+        $extension = Extension::factory()->for($organization)->for($member)->create();
+        $extension->credential()->create(['password' => 'member-only-secret']);
+        $extension->provisioningState()->create();
+        Sanctum::actingAs($admin);
+
+        $this->getJson(
+            "/api/v1/organizations/{$organization->public_id}/extensions/{$extension->public_id}/sip-registration",
+        )->assertForbidden();
+    }
+
     public function test_owner_can_rotate_a_sip_credential(): void
     {
         [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);

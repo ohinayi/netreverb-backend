@@ -33,6 +33,8 @@ class EmailVerificationController extends Controller
             return response()->json(['message' => 'Email verified successfully.']);
         }
 
-        return redirect()->away(rtrim(config('app.frontend_url'), '/').'/email/verified?status=success');
+        return redirect()->away(
+            rtrim(config('app.frontend_url'), '/').'/auth/verify-email?status=success',
+        );
     }
 }

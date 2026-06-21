@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\V1\ExtensionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
+use App\Http\Controllers\Api\V1\SipRegistrationController;
+use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -33,6 +35,10 @@ Route::prefix('v1')->group(function (): void {
             ->name('verification.send');
 
         Route::middleware('verified')->group(function (): void {
+            Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
+                ->middleware('throttle:webrtc-bootstrap')
+                ->name('webrtc.bootstrap');
+
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
 
             Route::scopeBindings()->group(function (): void {
@@ -41,6 +47,11 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/extensions/{extension}/credentials/rotate',
                     SipCredentialController::class,
                 )->name('organizations.extensions.credentials.rotate');
+                Route::get(
+                    'organizations/{organization}/extensions/{extension}/sip-registration',
+                    SipRegistrationController::class,
+                )->middleware('throttle:sip-registration')
+                    ->name('organizations.extensions.sip-registration.show');
                 Route::apiResource('organizations.service-numbers', ServiceNumberController::class)
                     ->parameters(['service-numbers' => 'serviceNumber']);
             });

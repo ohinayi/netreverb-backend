@@ -12,6 +12,7 @@ use App\Http\Resources\Api\V1\ExtensionResource;
 use App\Models\Extension;
 use App\Models\Organization;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
@@ -24,12 +25,16 @@ class ExtensionController extends Controller
         private DeleteExtension $deleteExtension,
     ) {}
 
-    public function index(Organization $organization): AnonymousResourceCollection
+    public function index(Request $request, Organization $organization): AnonymousResourceCollection
     {
         Gate::authorize('viewAny', [Extension::class, $organization]);
 
         $extensions = $organization->extensions()
             ->with(['dialableNumber', 'user', 'provisioningState'])
+            ->when(
+                Gate::denies('create', [Extension::class, $organization]),
+                fn ($query) => $query->whereBelongsTo($request->user()),
+            )
             ->latest()
             ->paginate(25);
 

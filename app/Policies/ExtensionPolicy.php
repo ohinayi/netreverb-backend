@@ -18,7 +18,9 @@ class ExtensionPolicy
 
     public function view(User $user, Extension $extension): bool
     {
-        return $this->activeMembership($user, $extension->organization_id) !== null;
+        return $this->canManage($user, $extension->organization_id)
+            || ($extension->user_id === $user->id
+                && $this->activeMembership($user, $extension->organization_id) !== null);
     }
 
     public function create(User $user, Organization $organization): bool
@@ -39,6 +41,12 @@ class ExtensionPolicy
     public function rotateCredential(User $user, Extension $extension): bool
     {
         return $this->canManage($user, $extension->organization_id);
+    }
+
+    public function viewSipRegistration(User $user, Extension $extension): bool
+    {
+        return $extension->user_id === $user->id
+            && $this->activeMembership($user, $extension->organization_id) !== null;
     }
 
     public function restore(User $user, Extension $extension): bool

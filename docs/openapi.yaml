@@ -4,13 +4,15 @@ info:
   version: 1.0.0
   description: |
     Multi-tenant communication control-plane API. Application authentication
-    and SIP credentials are separate. SIP passwords are returned only when an
-    extension is created or its credential is rotated.
+    and SIP credentials are separate. Assigned users can retrieve only their own
+    SIP registration settings for automatic application registration. Management
+    responses never include stored SIP passwords.
 servers:
   - url: /api/v1
     description: Current host
 tags:
   - name: Authentication
+  - name: WebRTC
   - name: Organizations
   - name: Extensions
   - name: Service Numbers
@@ -89,6 +91,45 @@ paths:
                     $ref: '#/components/schemas/User'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /webrtc/bootstrap:
+    get:
+      tags: [WebRTC]
+      operationId: bootstrapWebRtc
+      summary: Get SIP.js and ICE configuration for an assigned extension
+      description: |
+        Returns the assigned extension's SIP registration values and fresh
+        Coturn REST credentials. `expires_at` is the TURN credential expiry;
+        `sip.expires` is the SIP REGISTER refresh interval, not the lifetime of
+        the underlying SIP password. The response must never be cached.
+      parameters:
+        - name: extension_id
+          in: query
+          required: false
+          description: Required when the user has multiple active assigned extensions.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: WebRTC bootstrap configuration
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store, private
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebRtcBootstrap'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /email/verification-notification:
     post:
       tags: [Authentication]
@@ -169,7 +210,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OrganizationWrite'
+              $ref: '#/components/schemas/OrganizationCreate'
       responses:
         '201':
           description: Created
@@ -224,7 +265,7 @@ paths:
     get:
       tags: [Extensions]
       operationId: listExtensions
-      summary: List organization extensions
+      summary: List manageable extensions, or only assigned extensions for members
       parameters:
         - $ref: '#/components/parameters/Page'
       responses:
@@ -323,6 +364,36 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/extensions/{extension}/sip-registration:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExtensionId'
+    get:
+      tags: [Extensions]
+      operationId: getOwnSipRegistration
+      summary: Get automatic SIP registration settings for the assigned user
+      description: |
+        Only the user assigned to this extension may call this endpoint. The
+        response contains a secret and is sent with `Cache-Control: no-store`.
+        Owners and administrators cannot use it to read another user's password.
+      responses:
+        '200':
+          description: SIP registration settings
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store, private
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipRegistrationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /organizations/{organization}/service-numbers:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -587,6 +658,11 @@ components:
         settings:
           type: [object, 'null']
           additionalProperties: true
+    OrganizationCreate:
+      allOf:
+        - $ref: '#/components/schemas/OrganizationWrite'
+        - type: object
+          required: [name, slug]
     Organization:
       type: object
       required: [id, name, slug, status, timezone, locale]
@@ -836,6 +912,90 @@ components:
             display_once:
               type: boolean
               const: true
+    SipRegistrationResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required:
+            - extension_id
+            - username
+            - authorization_username
+            - password
+            - realm
+            - sip_uri
+            - sip_server
+            - sip_port
+            - websocket_url
+            - secure_websocket_url
+            - provisioning_status
+          properties:
+            extension_id:
+              type: string
+              description: Extension ULID
+            username:
+              type: string
+            authorization_username:
+              type: string
+            password:
+              type: string
+              description: Sensitive SIP secret for in-memory client use only
+            realm:
+              type: string
+            sip_uri:
+              type: string
+            sip_server:
+              type: string
+            sip_port:
+              type: integer
+            websocket_url:
+              type: string
+              format: uri
+            secure_websocket_url:
+              type: string
+              format: uri
+            provisioning_status:
+              type: string
+              enum: [pending, processing, active, failed, disabled]
+    WebRtcBootstrap:
+      type: object
+      required: [wss, sip, iceServers, expires_at]
+      properties:
+        wss:
+          type: string
+          format: uri
+        sip:
+          type: object
+          required: [username, password, realm, expires]
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+              description: Sensitive assigned-extension credential for in-memory use only.
+            realm:
+              type: string
+            expires:
+              type: integer
+              description: SIP REGISTER refresh interval in seconds.
+        iceServers:
+          type: array
+          items:
+            type: object
+            required: [urls]
+            properties:
+              urls:
+                type: array
+                items:
+                  type: string
+              username:
+                type: string
+              credential:
+                type: string
+        expires_at:
+          type: integer
+          description: Unix timestamp when the generated TURN credential expires.
     ServiceNumberResponse:
       type: object
       required: [data]
