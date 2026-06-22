@@ -49,7 +49,7 @@ class UpdateExtension
         }, attempts: 3);
 
         if ($event !== null) {
-            ProvisionSipSubscriber::dispatch($event->id);
+            ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
         }
 
         return $extension->refresh()->load(['dialableNumber', 'user', 'provisioningState']);

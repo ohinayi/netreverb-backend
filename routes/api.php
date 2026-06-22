@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
+use App\Http\Controllers\Api\V1\ConferenceRoomController;
 use App\Http\Controllers\Api\V1\ExtensionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
@@ -43,6 +44,25 @@ Route::prefix('v1')->group(function (): void {
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
+                Route::apiResource('organizations.conference-rooms', ConferenceRoomController::class)
+                    ->only(['index', 'store', 'show'])
+                    ->parameters(['conference-rooms' => 'conferenceRoom']);
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/join',
+                    [ConferenceRoomController::class, 'join'],
+                )->name('organizations.conference-rooms.join');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/invite',
+                    [ConferenceRoomController::class, 'invite'],
+                )->name('organizations.conference-rooms.invite');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/leave',
+                    [ConferenceRoomController::class, 'leave'],
+                )->name('organizations.conference-rooms.leave');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/end',
+                    [ConferenceRoomController::class, 'end'],
+                )->name('organizations.conference-rooms.end');
                 Route::post(
                     'organizations/{organization}/extensions/{extension}/credentials/rotate',
                     SipCredentialController::class,

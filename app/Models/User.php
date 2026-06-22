@@ -58,6 +58,16 @@ class User extends Authenticatable implements MustVerifyEmailContract
         return $this->hasMany(Extension::class);
     }
 
+    public function hostedConferenceRooms(): HasMany
+    {
+        return $this->hasMany(ConferenceRoom::class, 'host_user_id');
+    }
+
+    public function conferenceRoomParticipants(): HasMany
+    {
+        return $this->hasMany(ConferenceRoomParticipant::class);
+    }
+
     public function sendEmailVerificationNotification(): void
     {
         $this->notify(new VerifyEmailNotification);

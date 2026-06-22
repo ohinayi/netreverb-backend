@@ -12,3 +12,8 @@ Schedule::command('sip:reconcile')
     ->everyMinute()
     ->onOneServer()
     ->withoutOverlapping();
+
+Schedule::command('conference-rooms:expire')
+    ->everyMinute()
+    ->onOneServer()
+    ->withoutOverlapping();

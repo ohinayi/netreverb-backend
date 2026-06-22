@@ -53,7 +53,7 @@ class CreateExtension
             attempts: 3,
         );
 
-        ProvisionSipSubscriber::dispatch($event->id);
+        ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
 
         return new ExtensionCreationResult(
             $extension->load(['dialableNumber', 'user', 'provisioningState']),

@@ -68,6 +68,11 @@ class Organization extends Model
         return $this->hasMany(ServiceNumber::class);
     }
 
+    public function conferenceRooms(): HasMany
+    {
+        return $this->hasMany(ConferenceRoom::class);
+    }
+
     public function dialableNumbers(): HasMany
     {
         return $this->hasMany(DialableNumber::class);

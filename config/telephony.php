@@ -9,6 +9,9 @@ return [
     'sip_registration_expires' => (int) env('SIP_REGISTRATION_EXPIRES', 300),
     'automatic_extension_start' => (int) env('AUTOMATIC_EXTENSION_START', 100000),
     'automatic_extension_end' => (int) env('AUTOMATIC_EXTENSION_END', 899999),
+    'conference_number_start' => (int) env('CONFERENCE_NUMBER_START', 45100),
+    'conference_number_end' => (int) env('CONFERENCE_NUMBER_END', 459999),
+    'conference_default_duration_minutes' => (int) env('CONFERENCE_DEFAULT_DURATION_MINUTES', 120),
     'turn' => [
         'secret' => env('TURN_SECRET'),
         'host' => env('TURN_HOST', 'sip.classyra.com.ng'),

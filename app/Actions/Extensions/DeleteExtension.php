@@ -34,6 +34,6 @@ class DeleteExtension
             ]);
         }, attempts: 3);
 
-        ProvisionSipSubscriber::dispatch($event->id);
+        ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
     }
 }

@@ -60,10 +60,16 @@ class ProvisionSipSubscriber implements ShouldBeUnique, ShouldQueue
             password: $extension->credential->password,
         );
 
-        if ($event->operation === ProvisioningOperation::Upsert) {
-            $gateway->upsert($subscriber);
-        } else {
-            $gateway->delete($subscriber->username, $subscriber->realm);
+        try {
+            if ($event->operation === ProvisioningOperation::Upsert) {
+                $gateway->upsert($subscriber);
+            } else {
+                $gateway->delete($subscriber->username, $subscriber->realm);
+            }
+        } catch (Throwable $exception) {
+            $this->markAttemptFailed($event);
+
+            throw $exception;
         }
 
         $this->completeEvent($event, $extension);
@@ -150,6 +156,25 @@ class ProvisionSipSubscriber implements ShouldBeUnique, ShouldQueue
             if ($isUpsert && $extension->status === ExtensionStatus::Pending) {
                 $extension->update(['status' => ExtensionStatus::Active]);
             }
+        });
+    }
+
+    private function markAttemptFailed(SipProvisioningEvent $event): void
+    {
+        DB::transaction(function () use ($event): void {
+            $lockedEvent = SipProvisioningEvent::query()->lockForUpdate()->findOrFail($event->id);
+            $state = $lockedEvent->extension()->withTrashed()->firstOrFail()
+                ->provisioningState()->lockForUpdate()->firstOrFail();
+            $message = 'The SIP authentication store is temporarily unavailable. Provisioning will retry automatically.';
+
+            $lockedEvent->update([
+                'status' => ProvisioningEventStatus::Pending,
+                'last_error' => $message,
+            ]);
+            $state->update([
+                'status' => ProvisioningStatus::Pending,
+                'last_error' => $message,
+            ]);
         });
     }
 }

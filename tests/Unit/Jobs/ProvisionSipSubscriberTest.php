@@ -8,6 +8,7 @@ use App\Data\SipSubscriber;
 use App\Enums\ExtensionStatus;
 use App\Enums\ProvisioningEventStatus;
 use App\Enums\ProvisioningStatus;
+use App\Exceptions\SipProvisioningException;
 use App\Jobs\ProvisionSipSubscriber;
 use App\Models\Organization;
 use App\Models\SipProvisioningEvent;
@@ -63,5 +64,54 @@ class ProvisionSipSubscriberTest extends TestCase
         (new ProvisionSipSubscriber($event->id))->handle($gateway);
 
         $this->assertSame(ProvisioningEventStatus::Completed, $event->refresh()->status);
+    }
+
+    public function test_failed_gateway_attempt_remains_pending_for_automatic_retry(): void
+    {
+        Queue::fake();
+        $organization = Organization::factory()->create();
+        $result = app(CreateExtension::class)->execute($organization, [
+            'number' => '45107',
+            'display_name' => 'Retry Desk',
+            'type' => 'user',
+        ]);
+        $event = SipProvisioningEvent::query()->sole();
+        $gateway = Mockery::mock(SipSubscriberGateway::class);
+        $gateway->shouldReceive('upsert')
+            ->once()
+            ->andThrow(SipProvisioningException::databaseOperationFailed());
+
+        $exceptionRethrown = false;
+
+        try {
+            (new ProvisionSipSubscriber($event->id))->handle($gateway);
+        } catch (SipProvisioningException) {
+            $exceptionRethrown = true;
+        }
+
+        $this->assertTrue($exceptionRethrown);
+        $this->assertSame(ProvisioningEventStatus::Pending, $event->refresh()->status);
+        $this->assertSame(ProvisioningStatus::Pending, $result->extension->provisioningState->refresh()->status);
+        $this->assertSame(1, $event->attempts);
+        $this->assertNotNull($event->last_error);
+    }
+
+    public function test_exhausted_job_marks_the_event_and_state_as_failed(): void
+    {
+        Queue::fake();
+        $organization = Organization::factory()->create();
+        $result = app(CreateExtension::class)->execute($organization, [
+            'number' => '45108',
+            'display_name' => 'Failed Desk',
+            'type' => 'user',
+        ]);
+        $event = SipProvisioningEvent::query()->sole();
+
+        (new ProvisionSipSubscriber($event->id))->failed(
+            SipProvisioningException::databaseOperationFailed(),
+        );
+
+        $this->assertSame(ProvisioningEventStatus::Failed, $event->refresh()->status);
+        $this->assertSame(ProvisioningStatus::Failed, $result->extension->provisioningState->refresh()->status);
     }
 }
