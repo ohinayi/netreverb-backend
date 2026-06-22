@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AccountType;
 use App\Notifications\VerifyEmailNotification;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
@@ -18,6 +19,7 @@ use Laravel\Sanctum\HasApiTokens;
 #[Fillable([
     'name',
     'email',
+    'account_type',
     'password',
     'country_code',
     'timezone',
@@ -68,6 +70,36 @@ class User extends Authenticatable implements MustVerifyEmailContract
         return $this->hasMany(ConferenceRoomParticipant::class);
     }
 
+    public function sentFriendships(): HasMany
+    {
+        return $this->hasMany(Friendship::class, 'requester_id');
+    }
+
+    public function receivedFriendships(): HasMany
+    {
+        return $this->hasMany(Friendship::class, 'addressee_id');
+    }
+
+    public function communityMemberships(): HasMany
+    {
+        return $this->hasMany(CommunityMembership::class);
+    }
+
+    public function createdCommunities(): HasMany
+    {
+        return $this->hasMany(Community::class, 'owner_user_id');
+    }
+
+    public function conversations(): HasMany
+    {
+        return $this->hasMany(Conversation::class, 'created_by_user_id');
+    }
+
+    public function sentMessages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'sender_user_id');
+    }
+
     public function sendEmailVerificationNotification(): void
     {
         $this->notify(new VerifyEmailNotification);
@@ -82,6 +114,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
     {
         return [
             'email_verified_at' => 'datetime',
+            'account_type' => AccountType::class,
             'password' => 'hashed',
             'terms_accepted_at' => 'datetime',
             'last_login_at' => 'datetime',

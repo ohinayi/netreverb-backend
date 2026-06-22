@@ -14,6 +14,7 @@ class UserResource extends JsonResource
             'id' => $this->public_id,
             'name' => $this->name,
             'email' => $this->email,
+            'account_type' => $this->account_type?->value ?? $this->account_type,
             'email_verified' => $this->hasVerifiedEmail(),
             'country_code' => $this->country_code,
             'timezone' => $this->timezone,

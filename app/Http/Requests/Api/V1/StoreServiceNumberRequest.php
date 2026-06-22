@@ -23,6 +23,7 @@ class StoreServiceNumberRequest extends FormRequest
                 'required',
                 'string',
                 'regex:/^[0-9]{2,15}$/',
+                'not_regex:/^45[0-9]{9}$/',
                 Rule::unique((new DialableNumber)->getTable(), 'number')
                     ->where(fn ($query) => $query->where('realm', config('telephony.sip_realm'))),
             ],

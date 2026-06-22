@@ -4,8 +4,12 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
+use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
+use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\ExtensionController;
+use App\Http\Controllers\Api\V1\FriendshipController;
+use App\Http\Controllers\Api\V1\MessageController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
@@ -41,6 +45,22 @@ Route::prefix('v1')->group(function (): void {
                 ->name('webrtc.bootstrap');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
+            Route::get('people/search', [FriendshipController::class, 'search']);
+            Route::apiResource('friendships', FriendshipController::class)->only(['index', 'store', 'show']);
+            Route::post('friendships/{friendship}/respond', [FriendshipController::class, 'update'])
+                ->name('friendships.respond');
+            Route::apiResource('communities', CommunityController::class)->only(['index', 'store', 'show']);
+            Route::post('communities/{community}/join', [CommunityController::class, 'join'])
+                ->name('communities.join');
+            Route::post('communities/{community}/invite', [CommunityController::class, 'invite'])
+                ->name('communities.invite');
+            Route::post('communities/{community}/departments', [CommunityController::class, 'storeDepartment'])
+                ->name('communities.departments.store');
+            Route::post('communities/{community}/members/{user}/department', [CommunityController::class, 'assignDepartment'])
+                ->name('communities.members.department');
+            Route::apiResource('conversations', ConversationController::class)->only(['index', 'store', 'show']);
+            Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
+                ->name('conversations.messages.store');
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1\Auth;
 
+use App\Enums\AccountType;
 use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -20,6 +21,10 @@ class RegisterRequest extends FormRequest
         $this->merge([
             'email' => $this->string('email')->trim()->lower()->toString(),
             'country_code' => $this->string('country_code')->trim()->upper()->toString(),
+            'account_type' => $this->string('account_type')->trim()->lower()->toString(),
+            'workspace_name' => $this->filled('workspace_name')
+                ? $this->string('workspace_name')->trim()->toString()
+                : null,
         ]);
     }
 
@@ -44,6 +49,14 @@ class RegisterRequest extends FormRequest
             'country_code' => ['required', 'string', 'size:2', 'alpha:ascii'],
             'timezone' => ['required', 'string', 'timezone:all'],
             'locale' => ['required', 'string', 'regex:/^[a-z]{2}(?:-[A-Z]{2})?$/'],
+            'account_type' => ['required', Rule::enum(AccountType::class)],
+            'workspace_name' => [
+                Rule::requiredIf(fn (): bool => $this->string('account_type')->toString() === AccountType::Community->value),
+                'nullable',
+                'string',
+                'min:2',
+                'max:120',
+            ],
             'terms_accepted' => ['required', 'accepted'],
             'device_name' => ['sometimes', 'string', 'min:2', 'max:100'],
         ];

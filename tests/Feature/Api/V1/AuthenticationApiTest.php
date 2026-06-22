@@ -20,7 +20,7 @@ class AuthenticationApiTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_registration_creates_an_unverified_user_and_personal_workspace(): void
+    public function test_registration_creates_an_unverified_user_and_individual_workspace(): void
     {
         Notification::fake();
 
@@ -37,10 +37,33 @@ class AuthenticationApiTest extends TestCase
 
         $this->assertNull($user->email_verified_at);
         $this->assertSame('NG', $user->country_code);
-        $this->assertSame('personal', $organization->settings['kind']);
+        $this->assertSame('individual', $organization->settings['kind']);
         $this->assertSame($user->id, OrganizationMembership::query()->sole()->user_id);
         $this->assertDatabaseCount((new Extension)->getTable(), 0);
         Notification::assertSentTo($user, VerifyEmailNotification::class);
+    }
+
+    public function test_community_registration_creates_a_community_workspace_shell(): void
+    {
+        Notification::fake();
+
+        $response = $this->postJson('/api/v1/auth/register', array_merge(
+            $this->registrationPayload(),
+            [
+                'email' => 'community@example.com',
+                'account_type' => 'community',
+                'workspace_name' => 'North Clinic',
+            ],
+        ));
+
+        $response->assertCreated()
+            ->assertJsonPath('data.account_type', 'community');
+
+        $organization = Organization::query()->sole();
+
+        $this->assertSame('community', $organization->settings['kind']);
+        $this->assertSame('North Clinic', $organization->name);
+        $this->assertSame('community', User::query()->sole()->account_type->value);
     }
 
     public function test_unverified_user_cannot_access_tenant_apis(): void
@@ -130,6 +153,7 @@ class AuthenticationApiTest extends TestCase
             'country_code' => 'ng',
             'timezone' => 'Africa/Lagos',
             'locale' => 'en',
+            'account_type' => 'individual',
             'terms_accepted' => true,
             'device_name' => 'browser',
         ];

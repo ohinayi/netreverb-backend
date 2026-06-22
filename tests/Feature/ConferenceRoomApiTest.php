@@ -44,6 +44,7 @@ class ConferenceRoomApiTest extends TestCase
         $this->assertSame($organization->id, $room->organization_id);
         $this->assertSame($admin->id, $room->host_user_id);
         $this->assertStringStartsWith('45', $room->sip_number);
+        $this->assertSame(11, strlen($room->sip_number));
         $this->assertSame(1, $room->participants()->count());
 
         $participant = ConferenceRoomParticipant::query()->sole();

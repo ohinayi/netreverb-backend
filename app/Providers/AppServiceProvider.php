@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Contracts\Telephony\SipSubscriberGateway;
+use App\Models\User;
+use App\Observers\UserObserver;
 use App\Services\Telephony\DatabaseSipSubscriberGateway;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -28,6 +30,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Model::shouldBeStrict(! app()->isProduction());
+        User::observe(UserObserver::class);
 
         RateLimiter::for('webrtc-bootstrap', fn (Request $request): Limit => Limit::perMinute(10)
             ->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip())));

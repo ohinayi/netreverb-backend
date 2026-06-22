@@ -38,7 +38,7 @@ class ProvisionVerifiedUserExtension
                 ->where('role', MembershipRole::Owner->value)
                 ->whereHas('organization', fn ($query) => $query
                     ->where('extension_provisioning_mode', ExtensionProvisioningMode::Automatic->value)
-                    ->where('settings->kind', 'personal'))
+                    ->where('settings->kind', 'individual'))
                 ->oldest('id')
                 ->first();
 

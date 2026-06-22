@@ -72,4 +72,19 @@ class ServiceNumberApiTest extends TestCase
             'target' => '1000',
         ])->assertUnprocessable()->assertJsonValidationErrors('number');
     }
+
+    public function test_service_number_cannot_use_the_conference_range(): void
+    {
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/service-numbers", [
+            'number' => '45000000000',
+            'name' => 'Conference collision',
+            'type' => 'custom',
+            'target' => '1000',
+        ])->assertUnprocessable()->assertJsonValidationErrors('number');
+    }
 }
