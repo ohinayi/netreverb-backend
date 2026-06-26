@@ -1,0 +1,114 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\StoreCallLogRequest;
+use App\Http\Requests\Api\V1\UpdateCallLogRequest;
+use App\Http\Resources\Api\V1\CallLogResource;
+use App\Models\CallLog;
+use App\Models\Extension;
+use App\Models\Organization;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Gate;
+
+class CallLogController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     */
+    public function index(Request $request, Organization $organization): AnonymousResourceCollection
+    {
+        Gate::authorize('viewAny', [CallLog::class, $organization]);
+
+        // Only Owner/Admin can view all call logs. Regular members are limited to their own.
+        $canManage = Gate::allows('viewAll', [CallLog::class, $organization]);
+
+        $callLogs = $organization->callLogs()
+            ->with(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber'])
+            ->when(
+                ! $canManage,
+                function ($query) use ($request): void {
+                    $userExtensionIds = $request->user()->extensions()->pluck('id')->toArray();
+                    $query->where(function ($q) use ($userExtensionIds): void {
+                        $q->whereIn('caller_extension_id', $userExtensionIds)
+                            ->orWhereIn('callee_extension_id', $userExtensionIds);
+                    });
+                }
+            )
+            ->latest()
+            ->paginate(25);
+
+        return CallLogResource::collection($callLogs);
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(StoreCallLogRequest $request, Organization $organization): JsonResponse
+    {
+        Gate::authorize('create', [CallLog::class, $organization]);
+
+        $data = $request->validated();
+
+        if ($request->filled('caller_extension_public_id')) {
+            $data['caller_extension_id'] = Extension::query()
+                ->where('public_id', $request->string('caller_extension_public_id'))
+                ->value('id');
+        }
+        unset($data['caller_extension_public_id']);
+
+        if ($request->filled('callee_extension_public_id')) {
+            $data['callee_extension_id'] = Extension::query()
+                ->where('public_id', $request->string('callee_extension_public_id'))
+                ->value('id');
+        }
+        unset($data['callee_extension_public_id']);
+
+        $callLog = $organization->callLogs()->create($data);
+
+        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']))
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * Display the specified resource.
+     */
+    public function show(Organization $organization, CallLog $callLog): CallLogResource
+    {
+        Gate::authorize('view', $callLog);
+
+        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+    }
+
+    /**
+     * Transform the resource into an array.
+     */
+    public function update(
+        UpdateCallLogRequest $request,
+        Organization $organization,
+        CallLog $callLog,
+    ): CallLogResource {
+        Gate::authorize('update', $callLog);
+
+        $callLog->update($request->validated());
+
+        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Organization $organization, CallLog $callLog): Response
+    {
+        Gate::authorize('delete', $callLog);
+
+        $callLog->delete();
+
+        return response()->noContent();
+    }
+}

@@ -78,6 +78,11 @@ class Organization extends Model
         return $this->hasMany(DialableNumber::class);
     }
 
+    public function callLogs(): HasMany
+    {
+        return $this->hasMany(CallLog::class);
+    }
+
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
         return $query->whereHas(

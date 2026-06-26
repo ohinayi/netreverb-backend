@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
+use App\Http\Controllers\Api\V1\CallLogController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
 use App\Http\Controllers\Api\V1\ConversationController;
@@ -64,6 +65,8 @@ Route::prefix('v1')->group(function (): void {
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
+                Route::apiResource('organizations.call-logs', CallLogController::class)
+                    ->parameters(['call-logs' => 'callLog']);
                 Route::apiResource('organizations.conference-rooms', ConferenceRoomController::class)
                     ->only(['index', 'store', 'show'])
                     ->parameters(['conference-rooms' => 'conferenceRoom']);
