@@ -2,10 +2,19 @@
 
 namespace App\Providers;
 
+use App\Contracts\Recordings\CallRecordingStorage;
+use App\Contracts\Recordings\ConferenceRecordingStorage;
+use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Contracts\Telephony\SipSubscriberGateway;
 use App\Models\User;
 use App\Observers\UserObserver;
+use App\Services\Recordings\LocalCallRecordingStorage;
+use App\Services\Recordings\LocalConferenceRecordingStorage;
 use App\Services\Telephony\DatabaseSipSubscriberGateway;
+use App\Services\Telephony\FreeSwitchEventSocketClient;
+use App\Services\Telephony\SocketFreeSwitchCallGateway;
+use App\Services\Telephony\SocketFreeSwitchConferenceGateway;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +31,18 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(SipSubscriberGateway::class, DatabaseSipSubscriberGateway::class);
+        $this->app->bind(ConferenceRecordingStorage::class, LocalConferenceRecordingStorage::class);
+        $this->app->bind(CallRecordingStorage::class, LocalCallRecordingStorage::class);
+        $this->app->singleton(FreeSwitchEventSocketClient::class, function (): FreeSwitchEventSocketClient {
+            return new FreeSwitchEventSocketClient(
+                host: config('telephony.freeswitch.event_socket_host'),
+                port: (int) config('telephony.freeswitch.event_socket_port'),
+                password: (string) config('telephony.freeswitch.event_socket_password'),
+                timeoutSeconds: (int) config('telephony.freeswitch.event_socket_timeout_seconds'),
+            );
+        });
+        $this->app->bind(FreeSwitchConferenceGateway::class, SocketFreeSwitchConferenceGateway::class);
+        $this->app->bind(FreeSwitchCallGateway::class, SocketFreeSwitchCallGateway::class);
     }
 
     /**

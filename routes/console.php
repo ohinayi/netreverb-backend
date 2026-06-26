@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\CleanupCallRecordings;
+use App\Jobs\CleanupConferenceRecordings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,5 +17,15 @@ Schedule::command('sip:reconcile')
 
 Schedule::command('conference-rooms:expire')
     ->everyMinute()
+    ->onOneServer()
+    ->withoutOverlapping();
+
+Schedule::job(new CleanupConferenceRecordings)
+    ->daily()
+    ->onOneServer()
+    ->withoutOverlapping();
+
+Schedule::job(new CleanupCallRecordings)
+    ->daily()
     ->onOneServer()
     ->withoutOverlapping();

@@ -6,13 +6,16 @@ use App\Enums\ConferenceParticipantStatus;
 use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRoom;
 use App\Models\User;
+use App\Services\ConferenceRecordings\ConferenceRecordingManager;
 use Illuminate\Support\Facades\DB;
 
 class EndConferenceRoom
 {
+    public function __construct(private ConferenceRecordingManager $recordingManager) {}
+
     public function execute(ConferenceRoom $conferenceRoom, User $user): ConferenceRoom
     {
-        return DB::transaction(function () use ($conferenceRoom, $user): ConferenceRoom {
+        $conferenceRoom = DB::transaction(function () use ($conferenceRoom, $user): ConferenceRoom {
             $conferenceRoom = ConferenceRoom::query()
                 ->with('participants')
                 ->lockForUpdate()
@@ -31,5 +34,9 @@ class EndConferenceRoom
 
             return $conferenceRoom->fresh(['hostUser', 'participants.user', 'endedByUser']);
         }, attempts: 3);
+
+        $this->recordingManager->stop($conferenceRoom);
+
+        return $conferenceRoom;
     }
 }

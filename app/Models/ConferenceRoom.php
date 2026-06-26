@@ -65,6 +65,16 @@ class ConferenceRoom extends Model
         return $this->hasMany(ConferenceRoomParticipant::class);
     }
 
+    public function recordings(): HasMany
+    {
+        return $this->hasMany(ConferenceRecording::class);
+    }
+
+    public function conferenceRecordings(): HasMany
+    {
+        return $this->recordings();
+    }
+
     protected function casts(): array
     {
         return [

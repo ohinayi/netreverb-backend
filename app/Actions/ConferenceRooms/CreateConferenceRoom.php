@@ -8,6 +8,7 @@ use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\ConferenceRecordings\ConferenceRecordingManager;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -17,6 +18,7 @@ class CreateConferenceRoom
 {
     public function __construct(
         private AllocateConferenceRoomNumber $allocateConferenceRoomNumber,
+        private ConferenceRecordingManager $recordingManager,
     ) {}
 
     /**
@@ -29,7 +31,7 @@ class CreateConferenceRoom
      */
     public function execute(Organization $organization, User $host, array $attributes): ConferenceRoom
     {
-        return DB::transaction(function () use ($organization, $host, $attributes): ConferenceRoom {
+        $conferenceRoom = DB::transaction(function () use ($organization, $host, $attributes): ConferenceRoom {
             $conferenceRoom = ConferenceRoom::query()->create([
                 'organization_id' => $organization->id,
                 'host_user_id' => $host->id,
@@ -62,5 +64,9 @@ class CreateConferenceRoom
 
             return $conferenceRoom->load(['hostUser', 'participants.user']);
         }, attempts: 3);
+
+        $this->recordingManager->start($conferenceRoom);
+
+        return $conferenceRoom;
     }
 }

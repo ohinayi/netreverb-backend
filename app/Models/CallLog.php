@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use Database\Factories\CallLogFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,8 +21,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'status',
     'duration',
     'recording_url',
+    'recording_id',
+    'recording_uuid',
+    'recording_file_path',
+    'recording_file_name',
     'recording_duration',
     'recording_size',
+    'recording_status',
+    'recording_started_at',
+    'recording_ended_at',
     'started_at',
     'ended_at',
 ])]
@@ -65,8 +73,11 @@ class CallLog extends Model
         return [
             'status' => CallStatus::class,
             'duration' => 'integer',
+            'recording_status' => CallRecordingStatus::class,
             'recording_duration' => 'integer',
             'recording_size' => 'integer',
+            'recording_started_at' => 'datetime',
+            'recording_ended_at' => 'datetime',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',
         ];

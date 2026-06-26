@@ -47,6 +47,22 @@ return [
             'report' => false,
         ],
 
+        'freeswitch_recordings' => [
+            'driver' => 'local',
+            'root' => env('FREESWITCH_RECORDINGS_PATH', env('FREESWITCH_RECORDINGS_DIR', '/usr/local/freeswitch/recordings/conferences')),
+            'serve' => false,
+            'throw' => false,
+            'report' => false,
+        ],
+
+        'freeswitch_call_recordings' => [
+            'driver' => 'local',
+            'root' => env('FREESWITCH_CALL_RECORDINGS_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', '/usr/local/freeswitch/recordings/calls')),
+            'serve' => false,
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

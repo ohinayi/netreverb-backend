@@ -5,7 +5,9 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
+use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CommunityController;
+use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
 use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\ExtensionController;
@@ -67,6 +69,22 @@ Route::prefix('v1')->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
                 Route::apiResource('organizations.call-logs', CallLogController::class)
                     ->parameters(['call-logs' => 'callLog']);
+                Route::post(
+                    'organizations/{organization}/call-logs/{callLog}/recording/start',
+                    [CallRecordingController::class, 'start'],
+                )->name('organizations.call-logs.recording.start');
+                Route::post(
+                    'organizations/{organization}/call-logs/{callLog}/recording/stop',
+                    [CallRecordingController::class, 'stop'],
+                )->name('organizations.call-logs.recording.stop');
+                Route::get(
+                    'organizations/{organization}/call-logs/{callLog}/recording',
+                    [CallRecordingController::class, 'show'],
+                )->name('organizations.call-logs.recording.show');
+                Route::delete(
+                    'organizations/{organization}/call-logs/{callLog}/recording',
+                    [CallRecordingController::class, 'destroy'],
+                )->name('organizations.call-logs.recording.destroy');
                 Route::apiResource('organizations.conference-rooms', ConferenceRoomController::class)
                     ->only(['index', 'store', 'show'])
                     ->parameters(['conference-rooms' => 'conferenceRoom']);
@@ -86,6 +104,10 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/end',
                     [ConferenceRoomController::class, 'end'],
                 )->name('organizations.conference-rooms.end');
+                Route::delete(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/recordings/{conferenceRecording}',
+                    [ConferenceRecordingController::class, 'destroy'],
+                )->name('organizations.conference-rooms.recordings.destroy');
                 Route::post(
                     'organizations/{organization}/extensions/{extension}/credentials/rotate',
                     SipCredentialController::class,

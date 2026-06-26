@@ -7,12 +7,15 @@ use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
+use App\Services\ConferenceRecordings\ConferenceRecordingManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class JoinConferenceRoom
 {
+    public function __construct(private ConferenceRecordingManager $recordingManager) {}
+
     /**
      * @param array{
      *     display_name?: ?string,
@@ -22,7 +25,7 @@ class JoinConferenceRoom
      */
     public function execute(ConferenceRoom $conferenceRoom, User $user, array $attributes): ConferenceRoomParticipant
     {
-        return DB::transaction(function () use ($conferenceRoom, $user, $attributes): ConferenceRoomParticipant {
+        $participant = DB::transaction(function () use ($conferenceRoom, $user, $attributes): ConferenceRoomParticipant {
             $conferenceRoom = ConferenceRoom::query()
                 ->lockForUpdate()
                 ->findOrFail($conferenceRoom->id);
@@ -59,5 +62,9 @@ class JoinConferenceRoom
 
             return $participant->load('user');
         }, attempts: 3);
+
+        $this->recordingManager->start($conferenceRoom);
+
+        return $participant;
     }
 }

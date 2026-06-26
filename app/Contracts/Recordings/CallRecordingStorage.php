@@ -1,0 +1,24 @@
+<?php
+
+namespace App\Contracts\Recordings;
+
+use App\Data\CallRecordingLocation;
+use App\Models\CallLog;
+use Carbon\CarbonInterface;
+
+interface CallRecordingStorage
+{
+    public function buildLocation(
+        CallLog $callLog,
+        string $callUuid,
+        CarbonInterface $recordedAt,
+    ): CallRecordingLocation;
+
+    public function delete(CallLog $callLog): void;
+
+    public function exists(CallLog $callLog): bool;
+
+    public function size(CallLog $callLog): ?int;
+
+    public function absolutePath(CallLog $callLog): string;
+}

@@ -12,6 +12,20 @@ return [
     'conference_number_start' => (int) env('CONFERENCE_NUMBER_START', 45000000000),
     'conference_number_end' => (int) env('CONFERENCE_NUMBER_END', 45999999999),
     'conference_default_duration_minutes' => (int) env('CONFERENCE_DEFAULT_DURATION_MINUTES', 120),
+    'recordings' => [
+        'disk' => env('FREESWITCH_RECORDINGS_DISK', 'freeswitch_recordings'),
+        'retention_days' => (int) env('FREESWITCH_RECORDING_RETENTION_DAYS', 30),
+    ],
+    'call_recordings' => [
+        'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
+        'retention_days' => (int) env('FREESWITCH_CALL_RECORDING_RETENTION_DAYS', 30),
+    ],
+    'freeswitch' => [
+        'event_socket_host' => env('FREESWITCH_EVENT_SOCKET_HOST', env('FREESWITCH_HOST', '127.0.0.1')),
+        'event_socket_port' => (int) env('FREESWITCH_EVENT_SOCKET_PORT', env('FREESWITCH_PORT', 8021)),
+        'event_socket_password' => env('FREESWITCH_EVENT_SOCKET_PASSWORD', env('FREESWITCH_PASSWORD', 'ClueCon')),
+        'event_socket_timeout_seconds' => (int) env('FREESWITCH_EVENT_SOCKET_TIMEOUT_SECONDS', 5),
+    ],
     'turn' => [
         'secret' => env('TURN_SECRET'),
         'host' => env('TURN_HOST', 'sip.classyra.com.ng'),
