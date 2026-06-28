@@ -9,6 +9,7 @@ use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
+use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -29,6 +30,7 @@ class CallLogApiTest extends TestCase
                 'caller_extension_public_id' => $callerExtension->public_id,
                 'caller_number' => $callerExtension->dialableNumber->number,
                 'callee_number' => '+1234567890',
+                'freeswitch_uuid' => 'fs-call-uuid-1234',
                 'status' => CallStatus::Ringing->value,
                 'started_at' => now()->toDateTimeString(),
             ]
@@ -37,6 +39,7 @@ class CallLogApiTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('data.caller_number', $callerExtension->dialableNumber->number)
             ->assertJsonPath('data.callee_number', '+1234567890')
+            ->assertJsonPath('data.freeswitch_uuid', 'fs-call-uuid-1234')
             ->assertJsonPath('data.status', CallStatus::Ringing->value);
 
         $this->assertDatabaseHas('call_logs', [
@@ -44,6 +47,7 @@ class CallLogApiTest extends TestCase
             'caller_extension_id' => $callerExtension->id,
             'caller_number' => $callerExtension->dialableNumber->number,
             'callee_number' => '+1234567890',
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
         ]);
     }
 
@@ -104,6 +108,37 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.id', $callLog->public_id);
     }
 
+    public function test_show_can_trigger_uuid_sync_for_an_active_call_without_uuid(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::Ringing->value,
+            'freeswitch_uuid' => null,
+        ]);
+
+        $this->app->instance(
+            FreeSwitchCallUuidSynchronizer::class,
+            tap($this->mock(FreeSwitchCallUuidSynchronizer::class), function ($mock) use ($callLog): void {
+                $mock->shouldReceive('syncOnce')
+                    ->once()
+                    ->andReturnUsing(function () use ($callLog): int {
+                        $callLog->forceFill([
+                            'freeswitch_uuid' => 'fs-live-sync-uuid',
+                        ])->save();
+
+                        return 1;
+                    });
+            }),
+        );
+
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}");
+
+        $response->assertOk()
+            ->assertJsonPath('data.freeswitch_uuid', 'fs-live-sync-uuid');
+    }
+
     public function test_member_cannot_view_others_call_log(): void
     {
         [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
@@ -150,6 +185,7 @@ class CallLogApiTest extends TestCase
             [
                 'status' => CallStatus::Completed->value,
                 'duration' => 120,
+                'freeswitch_uuid' => 'fs-call-uuid-1234',
                 'recording_url' => 'https://storage.netreverb.com/recordings/test.mp3',
                 'recording_duration' => 120,
                 'recording_size' => 1048576,
@@ -160,6 +196,7 @@ class CallLogApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.status', CallStatus::Completed->value)
             ->assertJsonPath('data.duration', 120)
+            ->assertJsonPath('data.freeswitch_uuid', 'fs-call-uuid-1234')
             ->assertJsonPath('data.recording.url', 'https://storage.netreverb.com/recordings/test.mp3')
             ->assertJsonPath('data.recording.size', 1048576);
 
@@ -167,7 +204,41 @@ class CallLogApiTest extends TestCase
             'id' => $callLog->id,
             'status' => CallStatus::Completed->value,
             'duration' => 120,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
             'recording_url' => 'https://storage.netreverb.com/recordings/test.mp3',
+        ]);
+    }
+
+    public function test_owner_can_update_call_log_without_clearing_existing_freeswitch_uuid(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::Ringing->value,
+            'freeswitch_uuid' => 'fs-call-uuid-keep-me',
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        $response = $this->putJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}",
+            [
+                'status' => CallStatus::Completed->value,
+                'duration' => 32,
+                'freeswitch_uuid' => null,
+                'ended_at' => now()->toDateTimeString(),
+            ]
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', CallStatus::Completed->value)
+            ->assertJsonPath('data.duration', 32)
+            ->assertJsonPath('data.freeswitch_uuid', 'fs-call-uuid-keep-me');
+
+        $this->assertDatabaseHas('call_logs', [
+            'id' => $callLog->id,
+            'status' => CallStatus::Completed->value,
+            'duration' => 32,
+            'freeswitch_uuid' => 'fs-call-uuid-keep-me',
         ]);
     }
 

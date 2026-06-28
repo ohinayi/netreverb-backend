@@ -29,3 +29,8 @@ Schedule::job(new CleanupCallRecordings)
     ->daily()
     ->onOneServer()
     ->withoutOverlapping();
+
+Schedule::command('telephony:sync-freeswitch-call-uuids')
+    ->everySecond()
+    ->onOneServer()
+    ->withoutOverlapping();

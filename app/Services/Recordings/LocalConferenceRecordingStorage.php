@@ -26,12 +26,12 @@ class LocalConferenceRecordingStorage implements ConferenceRecordingStorage
         );
         $relativePath = $directory.'/'.$fileName;
 
-        Storage::disk(config('telephony.recordings.disk'))->makeDirectory($directory);
+        $absolutePath = rtrim((string) config('telephony.recordings.base_path'), '/').'/'.$relativePath;
 
         return new ConferenceRecordingLocation(
             relativePath: $relativePath,
             fileName: $fileName,
-            absolutePath: Storage::disk(config('telephony.recordings.disk'))->path($relativePath),
+            absolutePath: $absolutePath,
         );
     }
 
@@ -64,6 +64,6 @@ class LocalConferenceRecordingStorage implements ConferenceRecordingStorage
 
     public function absolutePath(ConferenceRecording $recording): string
     {
-        return Storage::disk(config('telephony.recordings.disk'))->path($recording->file_path);
+        return rtrim((string) config('telephony.recordings.base_path'), '/').'/'.$recording->file_path;
     }
 }

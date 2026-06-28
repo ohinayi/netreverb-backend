@@ -20,15 +20,77 @@ class FreeSwitchEventSocketClient
         try {
             $this->consumeBanner($socket);
             $this->send($socket, 'auth '.$this->password);
-            $authResponse = $this->readResponse($socket);
+            $authResponse = $this->readMessage($socket);
 
-            if (! str_contains($authResponse, '+OK')) {
+            if (! str_contains($authResponse['reply_text'] ?? '', '+OK')) {
                 throw new RuntimeException('FreeSWITCH event socket authentication failed.');
             }
 
             $this->send($socket, 'api '.$command);
 
-            return trim($this->readResponse($socket));
+            $response = $this->readMessage($socket);
+
+            return trim($response['body'] ?? $response['reply_text'] ?? '');
+        } finally {
+            fclose($socket);
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $eventNames
+     * @return array<int, array{headers: array<string, string>, body: string, reply_text: string}>
+     */
+    public function events(array $eventNames, int $listenSeconds = 1): array
+    {
+        $socket = $this->openSocket();
+
+        try {
+            $this->consumeBanner($socket);
+            $this->send($socket, 'auth '.$this->password);
+            $authResponse = $this->readMessage($socket);
+
+            if (! str_contains($authResponse['reply_text'] ?? '', '+OK')) {
+                throw new RuntimeException('FreeSWITCH event socket authentication failed.');
+            }
+
+            $this->send($socket, 'event plain '.implode(' ', $eventNames));
+            $subscribeResponse = $this->readMessage($socket);
+
+            if (! str_contains($subscribeResponse['reply_text'] ?? '', '+OK')) {
+                throw new RuntimeException('FreeSWITCH event socket subscription failed.');
+            }
+
+            $events = [];
+            $deadline = microtime(true) + max(1, $listenSeconds);
+
+            while (microtime(true) < $deadline) {
+                $remaining = max(0.0, $deadline - microtime(true));
+                $seconds = (int) floor($remaining);
+                $microseconds = (int) (($remaining - $seconds) * 1_000_000);
+                $read = [$socket];
+                $write = [];
+                $except = [];
+
+                $ready = @stream_select($read, $write, $except, $seconds, $microseconds);
+
+                if ($ready === false) {
+                    break;
+                }
+
+                if ($ready === 0) {
+                    continue;
+                }
+
+                $message = $this->readMessage($socket);
+
+                if ($message['headers'] === [] && $message['body'] === '' && $message['reply_text'] === '') {
+                    continue;
+                }
+
+                $events[] = $message;
+            }
+
+            return $events;
         } finally {
             fclose($socket);
         }
@@ -89,9 +151,12 @@ class FreeSwitchEventSocketClient
     /**
      * @param  resource  $socket
      */
-    private function readResponse($socket): string
+    /**
+     * @return array{headers: array<string, string>, body: string, reply_text: string}
+     */
+    private function readMessage($socket): array
     {
-        $buffer = '';
+        $headers = [];
 
         while (! feof($socket)) {
             $line = fgets($socket);
@@ -100,13 +165,45 @@ class FreeSwitchEventSocketClient
                 break;
             }
 
-            $buffer .= $line;
+            $trimmedLine = trim($line);
 
-            if (str_ends_with($buffer, "\n\n") || str_ends_with($buffer, "\r\n\r\n")) {
+            if ($trimmedLine === '') {
                 break;
+            }
+
+            if (str_contains($line, ':')) {
+                [$name, $value] = array_map('trim', explode(':', $line, 2));
+
+                $headers[strtolower($name)] = $value;
             }
         }
 
-        return $buffer;
+        $contentLength = isset($headers['content-length']) ? (int) $headers['content-length'] : 0;
+        $replyText = $headers['reply-text'] ?? '';
+        $body = '';
+
+        if ($contentLength <= 0) {
+            return [
+                'headers' => $headers,
+                'body' => '',
+                'reply_text' => $replyText,
+            ];
+        }
+
+        while (strlen($body) < $contentLength && ! feof($socket)) {
+            $chunk = fread($socket, $contentLength - strlen($body));
+
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+
+            $body .= $chunk;
+        }
+
+        return [
+            'headers' => $headers,
+            'body' => $body,
+            'reply_text' => $replyText,
+        ];
     }
 }

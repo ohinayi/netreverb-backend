@@ -30,6 +30,7 @@ class CallLogFactory extends Factory
             'callee_number' => fake()->e164PhoneNumber(),
             'status' => CallStatus::Completed,
             'duration' => $duration,
+            'freeswitch_uuid' => null,
             'recording_url' => null,
             'recording_id' => null,
             'recording_uuid' => null,

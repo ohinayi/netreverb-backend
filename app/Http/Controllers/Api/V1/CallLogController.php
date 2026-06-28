@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\CallStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
 use App\Http\Requests\Api\V1\UpdateCallLogRequest;
@@ -9,14 +10,20 @@ use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Extension;
 use App\Models\Organization;
+use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 
 class CallLogController extends Controller
 {
+    public function __construct(
+        private readonly FreeSwitchCallUuidSynchronizer $uuidSynchronizer,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -70,6 +77,14 @@ class CallLogController extends Controller
 
         $callLog = $organization->callLogs()->create($data);
 
+        Log::info('Call log created.', [
+            'call_log_id' => $callLog->public_id,
+            'caller_number' => $callLog->caller_number,
+            'callee_number' => $callLog->callee_number,
+            'freeswitch_uuid' => $callLog->freeswitch_uuid,
+            'status' => $callLog->status instanceof \BackedEnum ? $callLog->status->value : $callLog->status,
+        ]);
+
         return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']))
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
@@ -81,6 +96,18 @@ class CallLogController extends Controller
     public function show(Organization $organization, CallLog $callLog): CallLogResource
     {
         Gate::authorize('view', $callLog);
+
+        if ($callLog->freeswitch_uuid === null
+            && in_array($callLog->status, [CallStatus::Ringing, CallStatus::InProgress], true)) {
+            $matchedCount = $this->uuidSynchronizer->syncOnce();
+
+            Log::info('Call log show triggered FreeSWITCH UUID sync.', [
+                'call_log_id' => $callLog->public_id,
+                'matched_count' => $matchedCount,
+            ]);
+
+            $callLog->refresh();
+        }
 
         return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
     }
@@ -95,7 +122,21 @@ class CallLogController extends Controller
     ): CallLogResource {
         Gate::authorize('update', $callLog);
 
-        $callLog->update($request->validated());
+        $data = $request->validated();
+
+        if (array_key_exists('freeswitch_uuid', $data) && $data['freeswitch_uuid'] === null) {
+            unset($data['freeswitch_uuid']);
+        }
+
+        $callLog->update($data);
+
+        Log::info('Call log updated.', [
+            'call_log_id' => $callLog->public_id,
+            'caller_number' => $callLog->caller_number,
+            'callee_number' => $callLog->callee_number,
+            'freeswitch_uuid' => $callLog->freeswitch_uuid,
+            'status' => $callLog->status instanceof \BackedEnum ? $callLog->status->value : $callLog->status,
+        ]);
 
         return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
     }

@@ -54,6 +54,15 @@ class CallRecordingManager
                 'recording_size' => null,
             ])->save();
 
+            Log::info('Call recording metadata prepared.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callUuid,
+                'recording_file_path' => $location->relativePath,
+                'recording_file_name' => $location->fileName,
+            ]);
+
             $shouldStartRecording = true;
 
             return $callLog->refresh();
@@ -64,7 +73,17 @@ class CallRecordingManager
         }
 
         try {
-            $this->gateway->startRecording($callUuid, $this->storage->absolutePath($callLog));
+            $absolutePath = $this->storage->absolutePath($callLog);
+
+            Log::info('Starting FreeSWITCH call recording.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callUuid,
+                'recording_path' => $absolutePath,
+            ]);
+
+            $this->gateway->startRecording($callUuid, $absolutePath);
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Recording,
             ])->save();
@@ -77,6 +96,8 @@ class CallRecordingManager
                 'call_log_id' => $callLog->id,
                 'public_id' => $callLog->public_id,
                 'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callUuid,
+                'recording_file_path' => $callLog->recording_file_path,
                 'exception' => $exception::class,
             ]);
         }
@@ -105,7 +126,17 @@ class CallRecordingManager
         }
 
         try {
-            $this->gateway->stopRecording($callLog->recording_uuid, $this->storage->absolutePath($callLog));
+            $absolutePath = $this->storage->absolutePath($callLog);
+
+            Log::info('Stopping FreeSWITCH call recording.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callLog->recording_uuid,
+                'recording_path' => $absolutePath,
+            ]);
+
+            $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath);
             $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
             $endedAt = now();
 
@@ -124,6 +155,8 @@ class CallRecordingManager
                 'call_log_id' => $callLog->id,
                 'public_id' => $callLog->public_id,
                 'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callLog->recording_uuid,
+                'recording_file_path' => $callLog->recording_file_path,
                 'exception' => $exception::class,
             ]);
         }

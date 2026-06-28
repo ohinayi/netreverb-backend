@@ -25,6 +25,7 @@ class CallLogResource extends JsonResource
             'callee_number' => $this->callee_number,
             'status' => $this->status,
             'duration' => $this->duration,
+            'freeswitch_uuid' => $attributes['freeswitch_uuid'] ?? null,
             'recording' => $recordingUrl || $recordingFilePath ? [
                 'url' => $recordingUrl ?? $this->recordingUrlFor($request),
                 'duration' => $attributes['recording_duration'] ?? null,

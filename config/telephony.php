@@ -14,10 +14,12 @@ return [
     'conference_default_duration_minutes' => (int) env('CONFERENCE_DEFAULT_DURATION_MINUTES', 120),
     'recordings' => [
         'disk' => env('FREESWITCH_RECORDINGS_DISK', 'freeswitch_recordings'),
+        'base_path' => env('FREESWITCH_RECORDINGS_BASE_PATH', env('FREESWITCH_RECORDINGS_DIR', storage_path('app/freeswitch/recordings/conferences'))),
         'retention_days' => (int) env('FREESWITCH_RECORDING_RETENTION_DAYS', 30),
     ],
     'call_recordings' => [
         'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
+        'base_path' => env('FREESWITCH_CALL_RECORDINGS_BASE_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', storage_path('app/freeswitch/recordings/calls'))),
         'retention_days' => (int) env('FREESWITCH_CALL_RECORDING_RETENTION_DAYS', 30),
     ],
     'freeswitch' => [

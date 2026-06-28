@@ -49,7 +49,7 @@ return [
 
         'freeswitch_recordings' => [
             'driver' => 'local',
-            'root' => env('FREESWITCH_RECORDINGS_PATH', env('FREESWITCH_RECORDINGS_DIR', '/usr/local/freeswitch/recordings/conferences')),
+            'root' => env('FREESWITCH_RECORDINGS_PATH', storage_path('app/freeswitch/recordings/conferences')),
             'serve' => false,
             'throw' => false,
             'report' => false,
@@ -57,7 +57,7 @@ return [
 
         'freeswitch_call_recordings' => [
             'driver' => 'local',
-            'root' => env('FREESWITCH_CALL_RECORDINGS_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', '/usr/local/freeswitch/recordings/calls')),
+            'root' => env('FREESWITCH_CALL_RECORDINGS_PATH', storage_path('app/freeswitch/recordings/calls')),
             'serve' => false,
             'throw' => false,
             'report' => false,

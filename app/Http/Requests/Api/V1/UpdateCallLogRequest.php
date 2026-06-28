@@ -18,6 +18,7 @@ class UpdateCallLogRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'freeswitch_uuid' => ['sometimes', 'nullable', 'string', 'max:64'],
             'status' => ['sometimes', Rule::enum(CallStatus::class)],
             'duration' => ['sometimes', 'integer', 'min:0'],
             'recording_url' => ['sometimes', 'nullable', 'string', 'max:2048'],

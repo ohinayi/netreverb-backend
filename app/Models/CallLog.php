@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'callee_number',
     'status',
     'duration',
+    'freeswitch_uuid',
     'recording_url',
     'recording_id',
     'recording_uuid',
