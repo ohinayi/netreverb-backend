@@ -65,4 +65,15 @@ class LocalCallRecordingStorage implements CallRecordingStorage
     {
         return rtrim((string) config('telephony.call_recordings.base_path'), '/').'/'.$callLog->recording_file_path;
     }
+
+    public function ensureDirectoryExists(string $relativePath): void
+    {
+        $directory = trim(dirname($relativePath), './');
+
+        if ($directory === '') {
+            return;
+        }
+
+        Storage::disk(config('telephony.call_recordings.disk'))->makeDirectory($directory);
+    }
 }

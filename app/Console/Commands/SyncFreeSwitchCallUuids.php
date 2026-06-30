@@ -10,7 +10,7 @@ class SyncFreeSwitchCallUuids extends Command
 {
     protected $signature = 'telephony:sync-freeswitch-call-uuids {--watch : Keep listening for FreeSWITCH events instead of running once} {--listen-seconds=60 : Event listen window when watch mode is enabled}';
 
-    protected $description = 'Sync active FreeSWITCH channel UUIDs into call logs and start call recording.';
+    protected $description = 'Sync active FreeSWITCH channel UUIDs into call logs.';
 
     public function handle(FreeSwitchCallUuidSynchronizer $synchronizer): int
     {

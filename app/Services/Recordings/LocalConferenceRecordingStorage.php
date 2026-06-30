@@ -66,4 +66,15 @@ class LocalConferenceRecordingStorage implements ConferenceRecordingStorage
     {
         return rtrim((string) config('telephony.recordings.base_path'), '/').'/'.$recording->file_path;
     }
+
+    public function ensureDirectoryExists(string $relativePath): void
+    {
+        $directory = trim(dirname($relativePath), './');
+
+        if ($directory === '') {
+            return;
+        }
+
+        Storage::disk(config('telephony.recordings.disk'))->makeDirectory($directory);
+    }
 }

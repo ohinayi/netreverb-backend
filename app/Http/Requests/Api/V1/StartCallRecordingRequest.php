@@ -16,7 +16,8 @@ class StartCallRecordingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'recording_uuid' => ['required', 'string', 'max:64'],
+            'recording_uuid' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'freeswitch_uuid' => ['sometimes', 'nullable', 'string', 'max:64'],
         ];
     }
 }

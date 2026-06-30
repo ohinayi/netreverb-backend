@@ -11,6 +11,7 @@ use App\Services\CallRecordings\CallRecordingManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class CallRecordingController extends Controller
@@ -26,9 +27,25 @@ class CallRecordingController extends Controller
     ): CallLogResource {
         Gate::authorize('update', $callLog);
 
+        $callUuid = $request->string('recording_uuid')->toString();
+
+        if ($callUuid === '') {
+            $callUuid = $request->string('freeswitch_uuid')->toString();
+        }
+
+        if ($callUuid === '') {
+            $callUuid = (string) ($callLog->freeswitch_uuid ?? '');
+        }
+
+        if ($callUuid === '') {
+            throw ValidationException::withMessages([
+                'recording_uuid' => 'A FreeSWITCH UUID is required before recording can start.',
+            ]);
+        }
+
         $this->recordingManager->start(
             $callLog,
-            $request->string('recording_uuid')->toString(),
+            $callUuid,
         );
 
         return CallLogResource::make($callLog->fresh(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));

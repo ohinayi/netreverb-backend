@@ -2,17 +2,12 @@
 
 namespace Tests\Feature\Console;
 
-use App\Contracts\Recordings\CallRecordingStorage;
-use App\Contracts\Telephony\FreeSwitchCallGateway;
-use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Models\CallLog;
 use App\Models\Organization;
-use App\Services\CallRecordings\CallRecordingManager;
 use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
 use App\Services\Telephony\FreeSwitchEventSocketClient;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Support\Facades\Storage;
 use Mockery;
 use Tests\TestCase;
 
@@ -20,17 +15,14 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_it_syncs_the_real_freeswitch_uuid_and_starts_recording(): void
+    public function test_it_syncs_the_real_freeswitch_uuid(): void
     {
-        Storage::fake('freeswitch_call_recordings');
-
         $organization = Organization::factory()->create();
         $callLog = CallLog::factory()->for($organization)->create([
             'caller_number' => '1001',
             'callee_number' => '101',
             'status' => CallStatus::Ringing,
             'freeswitch_uuid' => null,
-            'recording_status' => null,
         ]);
 
         $client = Mockery::mock(FreeSwitchEventSocketClient::class);
@@ -47,15 +39,7 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
                 ],
             ]));
 
-        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
-        $gateway->shouldReceive('startRecording')
-            ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath): bool {
-                return $callUuid === 'fs-uuid-1234' && str_ends_with($absolutePath, '.wav');
-            });
-
         $this->app->instance(FreeSwitchEventSocketClient::class, $client);
-        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
 
         $this->artisan('telephony:sync-freeswitch-call-uuids')
             ->assertExitCode(0);
@@ -64,21 +48,18 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
 
         $this->assertSame('fs-uuid-1234', $callLog->freeswitch_uuid);
         $this->assertSame(CallStatus::InProgress, $callLog->status);
-        $this->assertSame(CallRecordingStatus::Recording, $callLog->recording_status);
-        $this->assertNotNull($callLog->recording_file_path);
+        $this->assertNull($callLog->recording_status);
+        $this->assertNull($callLog->recording_file_path);
     }
 
     public function test_it_syncs_the_real_freeswitch_uuid_from_event_stream_when_channels_snapshot_is_empty(): void
     {
-        Storage::fake('freeswitch_call_recordings');
-
         $organization = Organization::factory()->create();
         $callLog = CallLog::factory()->for($organization)->create([
             'caller_number' => '1001',
             'callee_number' => '101',
             'status' => CallStatus::Ringing,
             'freeswitch_uuid' => null,
-            'recording_status' => null,
         ]);
 
         $client = Mockery::mock(FreeSwitchEventSocketClient::class);
@@ -113,15 +94,7 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
                 ],
             ]);
 
-        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
-        $gateway->shouldReceive('startRecording')
-            ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath): bool {
-                return $callUuid === 'fs-uuid-5678' && str_ends_with($absolutePath, '.wav');
-            });
-
         $this->app->instance(FreeSwitchEventSocketClient::class, $client);
-        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
 
         $this->artisan('telephony:sync-freeswitch-call-uuids')
             ->assertExitCode(0);
@@ -130,21 +103,18 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
 
         $this->assertSame('fs-uuid-5678', $callLog->freeswitch_uuid);
         $this->assertSame(CallStatus::InProgress, $callLog->status);
-        $this->assertSame(CallRecordingStatus::Recording, $callLog->recording_status);
-        $this->assertNotNull($callLog->recording_file_path);
+        $this->assertNull($callLog->recording_status);
+        $this->assertNull($callLog->recording_file_path);
     }
 
     public function test_it_can_sync_from_event_stream_without_a_channel_snapshot(): void
     {
-        Storage::fake('freeswitch_call_recordings');
-
         $organization = Organization::factory()->create();
         $callLog = CallLog::factory()->for($organization)->create([
             'caller_number' => '1001',
             'callee_number' => '101',
             'status' => CallStatus::Ringing,
             'freeswitch_uuid' => null,
-            'recording_status' => null,
         ]);
 
         $client = Mockery::mock(FreeSwitchEventSocketClient::class);
@@ -172,17 +142,7 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
                 ],
             ]);
 
-        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
-        $gateway->shouldReceive('startRecording')
-            ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath): bool {
-                return $callUuid === 'fs-uuid-9012' && str_ends_with($absolutePath, '.wav');
-            });
-
-        $synchronizer = new FreeSwitchCallUuidSynchronizer($client, new CallRecordingManager(
-            $this->app->make(CallRecordingStorage::class),
-            $gateway,
-        ));
+        $synchronizer = new FreeSwitchCallUuidSynchronizer($client);
 
         $matched = $synchronizer->syncFromEvents(1);
 
@@ -191,20 +151,17 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
         $this->assertSame(1, $matched);
         $this->assertSame('fs-uuid-9012', $callLog->freeswitch_uuid);
         $this->assertSame(CallStatus::InProgress, $callLog->status);
-        $this->assertSame(CallRecordingStatus::Recording, $callLog->recording_status);
+        $this->assertNull($callLog->recording_status);
     }
 
     public function test_it_syncs_from_plain_event_headers(): void
     {
-        Storage::fake('freeswitch_call_recordings');
-
         $organization = Organization::factory()->create();
         $callLog = CallLog::factory()->for($organization)->create([
             'caller_number' => '1001',
             'callee_number' => '101',
             'status' => CallStatus::Ringing,
             'freeswitch_uuid' => null,
-            'recording_status' => null,
         ]);
 
         $client = Mockery::mock(FreeSwitchEventSocketClient::class);
@@ -232,17 +189,7 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
                 ],
             ]);
 
-        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
-        $gateway->shouldReceive('startRecording')
-            ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath): bool {
-                return $callUuid === 'fs-uuid-plain-headers' && str_ends_with($absolutePath, '.wav');
-            });
-
-        $synchronizer = new FreeSwitchCallUuidSynchronizer($client, new CallRecordingManager(
-            $this->app->make(CallRecordingStorage::class),
-            $gateway,
-        ));
+        $synchronizer = new FreeSwitchCallUuidSynchronizer($client);
 
         $matched = $synchronizer->syncFromEvents(1);
 
@@ -251,6 +198,6 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
         $this->assertSame(1, $matched);
         $this->assertSame('fs-uuid-plain-headers', $callLog->freeswitch_uuid);
         $this->assertSame(CallStatus::InProgress, $callLog->status);
-        $this->assertSame(CallRecordingStatus::Recording, $callLog->recording_status);
+        $this->assertNull($callLog->recording_status);
     }
 }

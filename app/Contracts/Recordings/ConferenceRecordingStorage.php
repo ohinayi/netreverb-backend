@@ -22,4 +22,6 @@ interface ConferenceRecordingStorage
     public function size(ConferenceRecording $recording): ?int;
 
     public function absolutePath(ConferenceRecording $recording): string;
+
+    public function ensureDirectoryExists(string $relativePath): void;
 }

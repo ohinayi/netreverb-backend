@@ -28,6 +28,7 @@ class CallRecordingApiTest extends TestCase
         Sanctum::actingAs($owner);
 
         $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'call-uuid-1234',
             'recording_status' => null,
             'recording_url' => null,
         ]);
@@ -54,13 +55,12 @@ class CallRecordingApiTest extends TestCase
 
         $startResponse = $this->postJson(
             "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/start",
-            [
-                'recording_uuid' => 'call-uuid-1234',
-            ],
+            [],
         );
 
         $startResponse->assertOk()
-            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value);
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value)
+            ->assertJsonPath('data.recording.playback_available', false);
 
         $callLog->refresh();
         $recordingFilePath = $callLog->recording_file_path;
@@ -72,7 +72,8 @@ class CallRecordingApiTest extends TestCase
         );
 
         $stopResponse->assertOk()
-            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value);
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.recording.playback_available', true);
 
         $playbackResponse = $this->get(
             "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording",
@@ -93,5 +94,78 @@ class CallRecordingApiTest extends TestCase
         $this->assertNull($callLog->recording_url);
         $this->assertNull($callLog->recording_file_path);
         $this->assertNull($callLog->recording_uuid);
+    }
+
+    public function test_start_recording_requires_a_freeswitch_uuid(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => null,
+        ]);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/start",
+            [],
+        )->assertUnprocessable()
+            ->assertJsonValidationErrors(['recording_uuid']);
+    }
+
+    public function test_stop_recording_marks_call_as_orphaned_when_no_file_exists_after_stop(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'call-uuid-1234',
+            'recording_uuid' => 'call-uuid-1234',
+            'recording_file_path' => '2026/06/30/missing.wav',
+            'recording_file_name' => 'missing.wav',
+            'recording_status' => CallRecordingStatus::Recording,
+            'recording_started_at' => now()->subSeconds(15),
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('stopRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath): bool {
+                return $callUuid === 'call-uuid-1234'
+                    && str_ends_with($absolutePath, '2026/06/30/missing.wav');
+            });
+
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/stop",
+        )->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Orphaned->value)
+            ->assertJsonPath('data.recording.playback_available', false);
+    }
+
+    public function test_call_without_recording_returns_null_recording_object(): void
+    {
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'recording_url' => null,
+            'recording_file_path' => null,
+            'recording_status' => null,
+        ]);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.recording', null);
     }
 }

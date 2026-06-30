@@ -21,4 +21,6 @@ interface CallRecordingStorage
     public function size(CallLog $callLog): ?int;
 
     public function absolutePath(CallLog $callLog): string;
+
+    public function ensureDirectoryExists(string $relativePath): void;
 }

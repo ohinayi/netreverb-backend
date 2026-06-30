@@ -5,6 +5,7 @@ namespace App\Services\CallRecordings;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
+use App\Exceptions\FreeSwitchRecordingException;
 use App\Models\CallLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -74,6 +75,7 @@ class CallRecordingManager
 
         try {
             $absolutePath = $this->storage->absolutePath($callLog);
+            $this->storage->ensureDirectoryExists($callLog->recording_file_path ?? '');
 
             Log::info('Starting FreeSWITCH call recording.', [
                 'call_log_id' => $callLog->id,
@@ -99,6 +101,7 @@ class CallRecordingManager
                 'recording_uuid' => $callUuid,
                 'recording_file_path' => $callLog->recording_file_path,
                 'exception' => $exception::class,
+                'message' => $exception->getMessage(),
             ]);
         }
 
@@ -137,6 +140,11 @@ class CallRecordingManager
             ]);
 
             $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath);
+
+            if (! $this->storage->exists($callLog)) {
+                throw FreeSwitchRecordingException::fileMissingAfterStop($absolutePath);
+            }
+
             $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
             $endedAt = now();
 
@@ -158,6 +166,7 @@ class CallRecordingManager
                 'recording_uuid' => $callLog->recording_uuid,
                 'recording_file_path' => $callLog->recording_file_path,
                 'exception' => $exception::class,
+                'message' => $exception->getMessage(),
             ]);
         }
 
@@ -219,5 +228,27 @@ class CallRecordingManager
             });
 
         return $deletedCount;
+    }
+
+    public function reconcileMissingFiles(): int
+    {
+        $reconciledCount = 0;
+
+        CallLog::query()
+            ->whereNotNull('recording_file_path')
+            ->whereNull('deleted_at')
+            ->oldest('id')
+            ->chunkById(100, function ($callLogs) use (&$reconciledCount): void {
+                foreach ($callLogs as $callLog) {
+                    if ($this->storage->exists($callLog)) {
+                        continue;
+                    }
+
+                    $this->delete($callLog);
+                    $reconciledCount++;
+                }
+            });
+
+        return $reconciledCount;
     }
 }

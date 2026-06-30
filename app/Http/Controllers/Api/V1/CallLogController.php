@@ -34,7 +34,7 @@ class CallLogController extends Controller
         // Only Owner/Admin can view all call logs. Regular members are limited to their own.
         $canManage = Gate::allows('viewAll', [CallLog::class, $organization]);
 
-        $callLogs = $organization->callLogs()
+        $callLogQuery = $organization->callLogs()
             ->with(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber'])
             ->when(
                 ! $canManage,
@@ -46,9 +46,38 @@ class CallLogController extends Controller
                     });
                 }
             )
-            ->latest()
-            ->paginate(25);
+            ->latest();
 
+        $callLogs = $callLogQuery->paginate(25);
+
+        if ($callLogs->getCollection()->contains(function (CallLog $callLog): bool {
+            return $callLog->freeswitch_uuid === null
+                && in_array($callLog->status, [CallStatus::Ringing, CallStatus::InProgress], true);
+        })) {
+            $matchedCount = $this->uuidSynchronizer->syncOnce();
+
+            Log::info('Call log index triggered FreeSWITCH UUID sync.', [
+                'organization_id' => $organization->public_id,
+                'matched_count' => $matchedCount,
+            ]);
+
+            $refreshedCallLogs = CallLog::query()
+                ->with(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber'])
+                ->whereKey($callLogs->getCollection()->modelKeys())
+                ->get()
+                ->keyBy('id');
+
+            $callLogs->setCollection(
+                $callLogs->getCollection()->map(
+                    static fn (CallLog $callLog): CallLog => $refreshedCallLogs[$callLog->id] ?? $callLog,
+                ),
+            );
+        }
+
+        Log::info('Call log index retrieved.', [
+            'organization_id' => $organization->public_id,
+            'call_log_count' => $callLogs->count(),
+        ]);
         return CallLogResource::collection($callLogs);
     }
 

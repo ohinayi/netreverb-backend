@@ -2,10 +2,8 @@
 
 namespace App\Services\Telephony;
 
-use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Models\CallLog;
-use App\Services\CallRecordings\CallRecordingManager;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -13,7 +11,6 @@ class FreeSwitchCallUuidSynchronizer
 {
     public function __construct(
         private readonly FreeSwitchEventSocketClient $client,
-        private readonly CallRecordingManager $recordingManager,
     ) {}
 
     public function syncOnce(int $listenSeconds = 5): int
@@ -276,16 +273,6 @@ class FreeSwitchCallUuidSynchronizer
                 ]);
             }
 
-            if ($this->shouldAutoStartRecording($callLog)) {
-                Log::info('Auto-starting call recording for synced FreeSWITCH UUID.', [
-                    'source' => $source,
-                    'call_log_id' => $callLog->public_id,
-                    'freeswitch_uuid' => $uuid,
-                ]);
-
-                $this->recordingManager->start($callLog->refresh(), $uuid);
-            }
-
             $matchedCount++;
         }
 
@@ -410,11 +397,5 @@ class FreeSwitchCallUuidSynchronizer
     private function normalizeKey(string $key): string
     {
         return strtolower(str_replace(['-', ' '], '_', trim($key)));
-    }
-
-    private function shouldAutoStartRecording(CallLog $callLog): bool
-    {
-        return $callLog->recording_status === null
-            || $callLog->recording_status === CallRecordingStatus::Failed;
     }
 }

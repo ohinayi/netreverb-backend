@@ -71,6 +71,7 @@ class ConferenceRecordingManager
         }
 
         try {
+            $this->storage->ensureDirectoryExists($recording->file_path ?? '');
             $this->gateway->startRecording($conferenceName, $this->storage->absolutePath($recording));
             $recording->forceFill([
                 'status' => ConferenceRecordingStatus::Recording,

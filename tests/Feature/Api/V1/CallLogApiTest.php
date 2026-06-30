@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\V1;
 
+use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Enums\MembershipRole;
 use App\Models\CallLog;
@@ -139,6 +140,37 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.freeswitch_uuid', 'fs-live-sync-uuid');
     }
 
+    public function test_index_can_trigger_uuid_sync_for_active_calls_without_uuid(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::Ringing->value,
+            'freeswitch_uuid' => null,
+        ]);
+
+        $this->app->instance(
+            FreeSwitchCallUuidSynchronizer::class,
+            tap($this->mock(FreeSwitchCallUuidSynchronizer::class), function ($mock) use ($callLog): void {
+                $mock->shouldReceive('syncOnce')
+                    ->once()
+                    ->andReturnUsing(function () use ($callLog): int {
+                        $callLog->forceFill([
+                            'freeswitch_uuid' => 'fs-index-sync-uuid',
+                        ])->save();
+
+                        return 1;
+                    });
+            }),
+        );
+
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs");
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.freeswitch_uuid', 'fs-index-sync-uuid');
+    }
+
     public function test_member_cannot_view_others_call_log(): void
     {
         [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
@@ -171,11 +203,109 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.id', $callLog->public_id);
     }
 
+    public function test_callee_sees_canceled_call_as_missed_incoming_call(): void
+    {
+        [$caller, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callee = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($callee)->create([
+            'role' => MembershipRole::Member,
+        ]);
+
+        $callerExtension = Extension::factory()->for($organization)->for($caller)->create();
+        $calleeExtension = Extension::factory()->for($organization)->for($callee)->create();
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'caller_extension_id' => $callerExtension->id,
+            'callee_extension_id' => $calleeExtension->id,
+            'caller_number' => $callerExtension->dialableNumber->number,
+            'callee_number' => $calleeExtension->dialableNumber->number,
+            'status' => CallStatus::Canceled->value,
+            'duration' => 0,
+        ]);
+
+        Sanctum::actingAs($callee);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.direction', 'incoming')
+            ->assertJsonPath('data.party_status', 'missed')
+            ->assertJsonPath('data.is_missed', true)
+            ->assertJsonPath('data.is_answered', false);
+    }
+
+    public function test_caller_sees_canceled_call_as_canceled_outgoing_call(): void
+    {
+        [$caller, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callee = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($callee)->create([
+            'role' => MembershipRole::Member,
+        ]);
+
+        $callerExtension = Extension::factory()->for($organization)->for($caller)->create();
+        $calleeExtension = Extension::factory()->for($organization)->for($callee)->create();
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'caller_extension_id' => $callerExtension->id,
+            'callee_extension_id' => $calleeExtension->id,
+            'caller_number' => $callerExtension->dialableNumber->number,
+            'callee_number' => $calleeExtension->dialableNumber->number,
+            'status' => CallStatus::Canceled->value,
+            'duration' => 0,
+        ]);
+
+        Sanctum::actingAs($caller);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.direction', 'outgoing')
+            ->assertJsonPath('data.party_status', 'canceled')
+            ->assertJsonPath('data.is_missed', false)
+            ->assertJsonPath('data.is_answered', false);
+    }
+
+    public function test_completed_call_is_reported_as_answered_for_both_parties(): void
+    {
+        [$caller, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callee = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($callee)->create([
+            'role' => MembershipRole::Member,
+        ]);
+
+        $callerExtension = Extension::factory()->for($organization)->for($caller)->create();
+        $calleeExtension = Extension::factory()->for($organization)->for($callee)->create();
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'caller_extension_id' => $callerExtension->id,
+            'callee_extension_id' => $calleeExtension->id,
+            'caller_number' => $callerExtension->dialableNumber->number,
+            'callee_number' => $calleeExtension->dialableNumber->number,
+            'status' => CallStatus::Completed->value,
+            'duration' => 45,
+        ]);
+
+        Sanctum::actingAs($caller);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.direction', 'outgoing')
+            ->assertJsonPath('data.party_status', 'answered')
+            ->assertJsonPath('data.is_answered', true);
+
+        Sanctum::actingAs($callee);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.direction', 'incoming')
+            ->assertJsonPath('data.party_status', 'answered')
+            ->assertJsonPath('data.is_answered', true);
+    }
+
     public function test_owner_can_update_call_log_status_and_recording(): void
     {
         [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
         $callLog = CallLog::factory()->for($organization)->create([
             'status' => CallStatus::Ringing->value,
+            'recording_status' => CallRecordingStatus::Completed->value,
         ]);
 
         Sanctum::actingAs($owner);
@@ -198,7 +328,8 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.duration', 120)
             ->assertJsonPath('data.freeswitch_uuid', 'fs-call-uuid-1234')
             ->assertJsonPath('data.recording.url', 'https://storage.netreverb.com/recordings/test.mp3')
-            ->assertJsonPath('data.recording.size', 1048576);
+            ->assertJsonPath('data.recording.size', 1048576)
+            ->assertJsonPath('data.recording.playback_available', true);
 
         $this->assertDatabaseHas('call_logs', [
             'id' => $callLog->id,
@@ -207,6 +338,23 @@ class CallLogApiTest extends TestCase
             'freeswitch_uuid' => 'fs-call-uuid-1234',
             'recording_url' => 'https://storage.netreverb.com/recordings/test.mp3',
         ]);
+    }
+
+    public function test_call_with_non_completed_recording_metadata_reports_playback_as_unavailable(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'recording_file_path' => '2026/06/30/test.wav',
+            'recording_file_name' => 'test.wav',
+            'recording_status' => CallRecordingStatus::Recording->value,
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value)
+            ->assertJsonPath('data.recording.playback_available', false);
     }
 
     public function test_owner_can_update_call_log_without_clearing_existing_freeswitch_uuid(): void
