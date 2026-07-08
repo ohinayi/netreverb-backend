@@ -5,8 +5,10 @@ namespace App\Services\CallRecordings;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
-use App\Exceptions\FreeSwitchRecordingException;
+use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
+use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -17,6 +19,7 @@ class CallRecordingManager
     public function __construct(
         private readonly CallRecordingStorage $storage,
         private readonly FreeSwitchCallGateway $gateway,
+        private readonly Dispatcher $dispatcher,
     ) {}
 
     public function start(CallLog $callLog, string $callUuid): ?CallLog
@@ -36,33 +39,14 @@ class CallRecordingManager
                 return $callLog;
             }
 
-            $recordedAt = now();
-            $location = $this->storage->buildLocation($callLog, $callUuid, $recordedAt);
-
+            $callLog = $this->prepareLockedCallLog($callLog, $callUuid, now());
             $callLog->forceFill([
-                'recording_id' => (string) Str::ulid(),
-                'recording_uuid' => $callUuid,
-                'recording_file_path' => $location->relativePath,
-                'recording_file_name' => $location->fileName,
-                'recording_url' => route('organizations.call-logs.recording.show', [
-                    'organization' => $callLog->organization?->public_id ?? $callLog->organization_id,
-                    'callLog' => $callLog->public_id,
-                ]),
                 'recording_status' => CallRecordingStatus::Starting,
-                'recording_started_at' => $recordedAt,
+                'recording_started_at' => $callLog->recording_started_at ?? now(),
                 'recording_ended_at' => null,
                 'recording_duration' => null,
                 'recording_size' => null,
             ])->save();
-
-            Log::info('Call recording metadata prepared.', [
-                'call_log_id' => $callLog->id,
-                'public_id' => $callLog->public_id,
-                'recording_id' => $callLog->recording_id,
-                'recording_uuid' => $callUuid,
-                'recording_file_path' => $location->relativePath,
-                'recording_file_name' => $location->fileName,
-            ]);
 
             $shouldStartRecording = true;
 
@@ -140,20 +124,30 @@ class CallRecordingManager
             ]);
 
             $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath);
-
-            if (! $this->storage->exists($callLog)) {
-                throw FreeSwitchRecordingException::fileMissingAfterStop($absolutePath);
-            }
-
             $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
             $endedAt = now();
+            $recordingExistsLocally = $this->storage->exists($callLog);
 
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Completed,
                 'recording_ended_at' => $endedAt,
                 'recording_duration' => max(0, $startedAt->diffInSeconds($endedAt)),
-                'recording_size' => $this->storage->size($callLog),
+                'recording_size' => $recordingExistsLocally ? $this->storage->size($callLog) : null,
             ])->save();
+
+            if (! $recordingExistsLocally) {
+                Log::warning('Call recording completed before the file became available on the application disk.', [
+                    'call_log_id' => $callLog->id,
+                    'public_id' => $callLog->public_id,
+                    'recording_id' => $callLog->recording_id,
+                    'recording_uuid' => $callLog->recording_uuid,
+                    'recording_file_path' => $callLog->recording_file_path,
+                ]);
+            }
+
+            if ($callLog->recording_file_path !== null && $callLog->recording_file_path !== '') {
+                $this->dispatcher->dispatchAfterResponse(new SyncCallRecordingFromVps($callLog->id));
+            }
         } catch (Throwable $exception) {
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Orphaned,
@@ -250,5 +244,62 @@ class CallRecordingManager
             });
 
         return $reconciledCount;
+    }
+
+    public function prepare(CallLog $callLog, string $callUuid): CallLog
+    {
+        return DB::transaction(function () use ($callLog, $callUuid): CallLog {
+            $lockedCallLog = CallLog::query()
+                ->lockForUpdate()
+                ->findOrFail($callLog->id);
+            $lockedCallLog->loadMissing('organization');
+
+            if ($this->hasPreparedRecordingMetadata($lockedCallLog, $callUuid)) {
+                return $lockedCallLog->refresh();
+            }
+
+            $preparedCallLog = $this->prepareLockedCallLog($lockedCallLog, $callUuid, now());
+            $preparedCallLog->save();
+            $this->storage->ensureDirectoryExists($preparedCallLog->recording_file_path ?? '');
+
+            return $preparedCallLog->refresh();
+        }, attempts: 3);
+    }
+
+    private function prepareLockedCallLog(CallLog $callLog, string $callUuid, Carbon $recordedAt): CallLog
+    {
+        $location = $this->storage->buildLocation($callLog, $callUuid, $recordedAt);
+
+        $callLog->forceFill([
+            'recording_id' => $callLog->recording_id ?: (string) Str::ulid(),
+            'recording_uuid' => $callUuid,
+            'recording_file_path' => $location->relativePath,
+            'recording_file_name' => $location->fileName,
+            'recording_url' => route('organizations.call-logs.recording.show', [
+                'organization' => $callLog->organization?->public_id ?? $callLog->organization_id,
+                'callLog' => $callLog->public_id,
+            ]),
+            'recording_started_at' => $callLog->recording_started_at ?? $recordedAt,
+        ]);
+
+        Log::info('Call recording metadata prepared.', [
+            'call_log_id' => $callLog->id,
+            'public_id' => $callLog->public_id,
+            'recording_id' => $callLog->recording_id,
+            'recording_uuid' => $callUuid,
+            'recording_file_path' => $location->relativePath,
+            'recording_file_name' => $location->fileName,
+        ]);
+
+        return $callLog;
+    }
+
+    private function hasPreparedRecordingMetadata(CallLog $callLog, string $callUuid): bool
+    {
+        return $callLog->recording_uuid === $callUuid
+            && $callLog->recording_file_path !== null
+            && $callLog->recording_file_path !== ''
+            && $callLog->recording_file_name !== null
+            && $callLog->recording_file_name !== '';
     }
 }

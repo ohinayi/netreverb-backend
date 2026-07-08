@@ -8,18 +8,20 @@ use Throwable;
 
 class SyncFreeSwitchCallUuids extends Command
 {
-    protected $signature = 'telephony:sync-freeswitch-call-uuids {--watch : Keep listening for FreeSWITCH events instead of running once} {--listen-seconds=60 : Event listen window when watch mode is enabled}';
+    protected $signature = 'telephony:sync-freeswitch-call-uuids {--watch : Keep listening for FreeSWITCH events instead of running once} {--listen-seconds=1 : Event listen window in seconds}';
 
     protected $description = 'Sync active FreeSWITCH channel UUIDs into call logs.';
 
     public function handle(FreeSwitchCallUuidSynchronizer $synchronizer): int
     {
+        $listenSeconds = max(1, (int) $this->option('listen-seconds'));
+
         if ($this->option('watch')) {
-            return $this->watch($synchronizer);
+            return $this->watch($synchronizer, $listenSeconds);
         }
 
         try {
-            $matched = $synchronizer->syncOnce();
+            $matched = $synchronizer->syncOnce($listenSeconds);
         } catch (Throwable $exception) {
             $this->error($exception->getMessage());
 
@@ -31,10 +33,8 @@ class SyncFreeSwitchCallUuids extends Command
         return self::SUCCESS;
     }
 
-    private function watch(FreeSwitchCallUuidSynchronizer $synchronizer): int
+    private function watch(FreeSwitchCallUuidSynchronizer $synchronizer, int $listenSeconds): int
     {
-        $listenSeconds = max(1, (int) $this->option('listen-seconds'));
-
         $this->components->info(sprintf(
             'Watching FreeSWITCH events in %d second window(s). Press Ctrl+C to stop.',
             $listenSeconds,

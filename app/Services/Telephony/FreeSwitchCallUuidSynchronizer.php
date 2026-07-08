@@ -13,7 +13,7 @@ class FreeSwitchCallUuidSynchronizer
         private readonly FreeSwitchEventSocketClient $client,
     ) {}
 
-    public function syncOnce(int $listenSeconds = 5): int
+    public function syncOnce(int $listenSeconds = 1): int
     {
         $syncRunId = (string) Str::ulid();
 

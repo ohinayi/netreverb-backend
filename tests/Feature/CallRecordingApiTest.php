@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
+use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
@@ -21,6 +23,7 @@ class CallRecordingApiTest extends TestCase
     public function test_owner_can_start_stop_play_back_and_delete_a_call_recording(): void
     {
         Storage::fake('freeswitch_call_recordings');
+        Bus::fake();
 
         $owner = User::factory()->create();
         $organization = Organization::factory()->create();
@@ -75,6 +78,10 @@ class CallRecordingApiTest extends TestCase
             ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
             ->assertJsonPath('data.recording.playback_available', true);
 
+        Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id;
+        });
+
         $playbackResponse = $this->get(
             "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording",
         );
@@ -116,9 +123,10 @@ class CallRecordingApiTest extends TestCase
             ->assertJsonValidationErrors(['recording_uuid']);
     }
 
-    public function test_stop_recording_marks_call_as_orphaned_when_no_file_exists_after_stop(): void
+    public function test_stop_recording_marks_call_as_completed_even_when_file_is_not_yet_available_locally(): void
     {
         Storage::fake('freeswitch_call_recordings');
+        Bus::fake();
 
         $owner = User::factory()->create();
         $organization = Organization::factory()->create();
@@ -147,8 +155,12 @@ class CallRecordingApiTest extends TestCase
         $this->postJson(
             "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/stop",
         )->assertOk()
-            ->assertJsonPath('data.recording.status', CallRecordingStatus::Orphaned->value)
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
             ->assertJsonPath('data.recording.playback_available', false);
+
+        Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id;
+        });
     }
 
     public function test_call_without_recording_returns_null_recording_object(): void

@@ -3,9 +3,11 @@
 namespace App\Http\Resources\Api\V1;
 
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallStatus;
 use App\Models\Organization;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class CallLogResource extends JsonResource
 {
@@ -23,20 +25,21 @@ class CallLogResource extends JsonResource
             ? $this->recording_status?->value ?? $attributes['recording_status']
             : null;
         $playbackAvailable = $this->recordingPlaybackAvailable($recordingStatus, $recordingUrl, $recordingFilePath);
-        $viewerPerspective = $this->viewerPerspective($request);
+        $callPerspective = $this->callPerspective($request);
+        $hasVisibleRecording = $recordingStatus !== null;
 
         return [
             'id' => $this->public_id,
             'caller_number' => $this->caller_number,
             'callee_number' => $this->callee_number,
             'status' => $this->status,
-            'direction' => $viewerPerspective['direction'],
-            'party_status' => $viewerPerspective['party_status'],
-            'is_missed' => $viewerPerspective['party_status'] === 'missed',
-            'is_answered' => $viewerPerspective['party_status'] === 'answered',
+            'direction' => $callPerspective['direction'],
+            'party_status' => $callPerspective['party_status'],
+            'is_missed' => $callPerspective['party_status'] === 'missed',
+            'is_answered' => $callPerspective['party_status'] === 'answered',
             'duration' => $this->duration,
             'freeswitch_uuid' => $attributes['freeswitch_uuid'] ?? null,
-            'recording' => $recordingUrl || $recordingFilePath ? [
+            'recording' => $hasVisibleRecording ? [
                 'url' => $recordingUrl ?? $this->recordingUrlFor($request),
                 'duration' => $attributes['recording_duration'] ?? null,
                 'size' => $attributes['recording_size'] ?? null,
@@ -82,31 +85,40 @@ class CallLogResource extends JsonResource
         ?string $recordingUrl,
         ?string $recordingFilePath,
     ): bool {
-        return $recordingStatus === CallRecordingStatus::Completed->value
-            && (($recordingUrl !== null && $recordingUrl !== '') || ($recordingFilePath !== null && $recordingFilePath !== ''));
+        if ($recordingStatus !== CallRecordingStatus::Completed->value) {
+            return false;
+        }
+
+        if ($recordingFilePath !== null && $recordingFilePath !== '') {
+            return Storage::disk(config('telephony.call_recordings.disk'))->exists($recordingFilePath);
+        }
+
+        return $recordingUrl !== null && $recordingUrl !== '';
     }
 
     /**
      * @return array{direction: string, party_status: string}
      */
-    private function viewerPerspective(Request $request): array
+    private function callPerspective(Request $request): array
     {
-        $callerUserId = $this->callerExtension?->user_id;
-        $calleeUserId = $this->calleeExtension?->user_id;
-        $viewerUserId = $request->user()?->getKey();
+        if ($this->caller_extension_id !== null && $this->callee_extension_id !== null) {
+            $viewerUserId = $request->user()?->getKey();
+            $callerUserId = $this->callerExtension?->user_id;
+            $calleeUserId = $this->calleeExtension?->user_id;
 
-        $direction = 'external';
-        $viewerIsCaller = $viewerUserId !== null && $callerUserId === $viewerUserId;
-        $viewerIsCallee = $viewerUserId !== null && $calleeUserId === $viewerUserId;
-
-        if ($viewerIsCaller && $viewerIsCallee) {
-            $direction = 'internal';
-        } elseif ($viewerIsCaller) {
+            if ($viewerUserId !== null && $viewerUserId === $callerUserId) {
+                $direction = 'outgoing';
+            } elseif ($viewerUserId !== null && $viewerUserId === $calleeUserId) {
+                $direction = 'incoming';
+            } else {
+                $direction = 'internal';
+            }
+        } elseif ($this->caller_extension_id !== null) {
             $direction = 'outgoing';
-        } elseif ($viewerIsCallee) {
+        } elseif ($this->callee_extension_id !== null) {
             $direction = 'incoming';
-        } elseif ($callerUserId !== null && $calleeUserId !== null) {
-            $direction = 'internal';
+        } else {
+            $direction = 'external';
         }
 
         return [
@@ -118,13 +130,13 @@ class CallLogResource extends JsonResource
     private function partyStatusForDirection(string $direction): string
     {
         return match ($this->status?->value ?? $this->status) {
-            'completed' => 'answered',
-            'in_progress' => 'ongoing',
-            'ringing' => 'ringing',
+            CallStatus::Completed->value => 'answered',
+            CallStatus::InProgress->value => 'ongoing',
+            CallStatus::Ringing->value => 'ringing',
             'busy' => $direction === 'incoming' ? 'missed' : 'busy',
-            'failed' => 'failed',
-            'no_answer' => $direction === 'outgoing' ? 'unanswered' : 'missed',
-            'canceled' => $direction === 'incoming' ? 'missed' : 'canceled',
+            CallStatus::Failed->value => 'failed',
+            CallStatus::NoAnswer->value => $direction === 'outgoing' ? 'unanswered' : 'missed',
+            CallStatus::Canceled->value => $direction === 'incoming' ? 'missed' : 'canceled',
             default => 'unknown',
         };
     }

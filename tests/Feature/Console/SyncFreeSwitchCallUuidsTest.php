@@ -79,6 +79,7 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
 
         $client->shouldReceive('events')
             ->once()
+            ->with(Mockery::type('array'), 1)
             ->andReturn([
                 [
                     'headers' => [
@@ -199,5 +200,21 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
         $this->assertSame('fs-uuid-plain-headers', $callLog->freeswitch_uuid);
         $this->assertSame(CallStatus::InProgress, $callLog->status);
         $this->assertNull($callLog->recording_status);
+    }
+
+    public function test_it_passes_the_configured_listen_seconds_to_sync_once(): void
+    {
+        $this->app->instance(
+            FreeSwitchCallUuidSynchronizer::class,
+            tap(Mockery::mock(FreeSwitchCallUuidSynchronizer::class), function ($mock): void {
+                $mock->shouldReceive('syncOnce')
+                    ->once()
+                    ->with(2)
+                    ->andReturn(0);
+            }),
+        );
+
+        $this->artisan('telephony:sync-freeswitch-call-uuids --listen-seconds=2')
+            ->assertExitCode(0);
     }
 }

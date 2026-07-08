@@ -2,9 +2,9 @@
 
 namespace App\Services\CallRecordings;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
+use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Process\Process;
 
 class CallRecordingVpsSynchronizer
@@ -17,8 +17,9 @@ class CallRecordingVpsSynchronizer
         string $user,
         string $remoteBasePath,
         ?string $remoteRelativePath,
+        ?string $password,
         bool $dryRun,
-        OutputStyle $output,
+        OutputInterface $output,
     ): array {
         $localBasePath = (string) config('filesystems.disks.'.config('telephony.call_recordings.disk').'.root');
 
@@ -36,6 +37,8 @@ class CallRecordingVpsSynchronizer
             'rsync',
             '-avz',
             '--progress',
+            '-e',
+            'ssh -o StrictHostKeyChecking=accept-new',
         ];
 
         if ($dryRun) {
@@ -45,19 +48,32 @@ class CallRecordingVpsSynchronizer
         $command[] = sprintf('%s@%s:%s', $user, $host, $remotePath);
         $command[] = $localPath;
 
-        $process = new Process($command, base_path());
+        $processEnvironment = [];
+        $askPassScript = null;
+
+        if ($password !== null && $password !== '') {
+            [$askPassScript, $processEnvironment] = $this->buildAskPassEnvironment($password);
+        }
+
+        $process = new Process($command, base_path(), $processEnvironment);
         $process->setTimeout(null);
 
-        if ($this->canUseTty()) {
+        if ($password === null && $this->canUseTty()) {
             $process->setTty(true);
         }
 
         $output->writeln(sprintf('Syncing from %s@%s:%s', $user, $host, $remotePath));
         $output->writeln(sprintf('Syncing to %s', $localPath));
 
-        $process->run(function (string $type, string $buffer) use ($output): void {
-            $output->write($buffer);
-        });
+        try {
+            $process->run(function (string $type, string $buffer) use ($output): void {
+                $output->write($buffer);
+            });
+        } finally {
+            if ($askPassScript !== null && file_exists($askPassScript)) {
+                @unlink($askPassScript);
+            }
+        }
 
         if (! $process->isSuccessful()) {
             throw new RuntimeException(trim($process->getErrorOutput()) !== ''
@@ -89,5 +105,30 @@ class CallRecordingVpsSynchronizer
         return DIRECTORY_SEPARATOR !== '\\'
             && function_exists('stream_isatty')
             && stream_isatty(STDIN);
+    }
+
+    /**
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private function buildAskPassEnvironment(string $password): array
+    {
+        $askPassScript = tempnam(sys_get_temp_dir(), 'netreverb-ssh-askpass-');
+
+        if ($askPassScript === false) {
+            throw new RuntimeException('Unable to create a temporary SSH askpass script.');
+        }
+
+        file_put_contents($askPassScript, "#!/bin/sh\nprintf '%s' \"\$NETREVERB_SYNC_SSH_PASSWORD\"\n");
+        chmod($askPassScript, 0700);
+
+        return [
+            $askPassScript,
+            [
+                'DISPLAY' => 'netreverb-sync:0',
+                'SSH_ASKPASS' => $askPassScript,
+                'SSH_ASKPASS_REQUIRE' => 'force',
+                'NETREVERB_SYNC_SSH_PASSWORD' => $password,
+            ],
+        ];
     }
 }

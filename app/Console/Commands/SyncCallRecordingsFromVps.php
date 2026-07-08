@@ -19,12 +19,15 @@ class SyncCallRecordingsFromVps extends Command
 {
     public function handle(CallRecordingVpsSynchronizer $synchronizer): int
     {
+        $password = config('telephony.call_recordings.sync.password');
+
         try {
             $result = $synchronizer->sync(
                 host: (string) $this->option('host'),
                 user: (string) $this->option('user'),
                 remoteBasePath: (string) $this->option('remote-base'),
                 remoteRelativePath: $this->argument('path') !== null ? (string) $this->argument('path') : null,
+                password: is_string($password) && $password !== '' ? $password : null,
                 dryRun: (bool) $this->option('dry-run'),
                 output: $this->output,
             );

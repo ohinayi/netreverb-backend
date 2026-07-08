@@ -23,6 +23,7 @@ class SyncCallRecordingsFromVpsTest extends TestCase
                         string $user,
                         string $remoteBasePath,
                         ?string $remoteRelativePath,
+                        ?string $password,
                         bool $dryRun,
                         $output,
                     ): bool {
@@ -30,6 +31,7 @@ class SyncCallRecordingsFromVpsTest extends TestCase
                             && $user === 'deploy'
                             && $remoteBasePath === '/usr/local/freeswitch/var/lib/freeswitch/recordings/calls'
                             && $remoteRelativePath === null
+                            && $password === null
                             && $dryRun === false;
                     })
                     ->andReturn([
@@ -58,10 +60,12 @@ class SyncCallRecordingsFromVpsTest extends TestCase
                         string $user,
                         string $remoteBasePath,
                         ?string $remoteRelativePath,
+                        ?string $password,
                         bool $dryRun,
                         $output,
                     ): bool {
                         return $remoteRelativePath === '2026/06/30'
+                            && $password === null
                             && $dryRun === true;
                     })
                     ->andReturn([

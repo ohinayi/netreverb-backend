@@ -21,6 +21,13 @@ return [
         'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
         'base_path' => env('FREESWITCH_CALL_RECORDINGS_BASE_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', storage_path('app/public/recordings/calls'))),
         'retention_days' => (int) env('FREESWITCH_CALL_RECORDING_RETENTION_DAYS', 30),
+        'sync' => [
+            'enabled' => env('FREESWITCH_CALL_RECORDINGS_AUTO_SYNC', true),
+            'host' => env('FREESWITCH_CALL_RECORDINGS_SYNC_HOST', 'sip.classyra.com.ng'),
+            'user' => env('FREESWITCH_CALL_RECORDINGS_SYNC_USER', 'deploy'),
+            'password' => env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD'),
+            'remote_base' => env('FREESWITCH_CALL_RECORDINGS_SYNC_REMOTE_BASE', '/usr/local/freeswitch/var/lib/freeswitch/recordings/calls'),
+        ],
     ],
     'freeswitch' => [
         'event_socket_host' => env('FREESWITCH_EVENT_SOCKET_HOST', env('FREESWITCH_HOST', '127.0.0.1')),
