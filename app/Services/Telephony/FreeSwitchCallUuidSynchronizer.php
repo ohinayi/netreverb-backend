@@ -198,15 +198,21 @@ class FreeSwitchCallUuidSynchronizer
 
             $uuid = $this->channelValue($channel, ['uuid', 'Unique-ID', 'unique_id']);
             $callerNumber = $this->channelValue($channel, [
+                'cid_num',
+                'cid_number',
                 'caller_id_number',
                 'Caller-Caller-ID-Number',
+                'caller_caller_id_number',
                 'variable_effective_caller_id_number',
                 'variable_sip_from_user',
                 'variable_caller_id_number',
             ]);
             $calleeNumber = $this->channelValue($channel, [
+                'dest',
+                'callee_num',
                 'destination_number',
                 'Caller-Destination-Number',
+                'caller_destination_number',
                 'variable_sip_req_user',
                 'variable_sip_to_user',
                 'variable_called_user',

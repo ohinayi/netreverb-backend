@@ -52,6 +52,43 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
         $this->assertNull($callLog->recording_file_path);
     }
 
+    public function test_it_syncs_the_real_freeswitch_uuid_from_current_snapshot_field_names(): void
+    {
+        $organization = Organization::factory()->create();
+        $callLog = CallLog::factory()->for($organization)->create([
+            'caller_number' => '100000',
+            'callee_number' => '101',
+            'status' => CallStatus::Ringing,
+            'freeswitch_uuid' => null,
+        ]);
+
+        $client = Mockery::mock(FreeSwitchEventSocketClient::class);
+        $client->shouldReceive('api')
+            ->once()
+            ->with('show channels as json')
+            ->andReturn(json_encode([
+                'rows' => [
+                    [
+                        'uuid' => 'fs-uuid-current-snapshot',
+                        'cid_num' => '100000',
+                        'dest' => '101',
+                    ],
+                ],
+            ]));
+
+        $this->app->instance(FreeSwitchEventSocketClient::class, $client);
+
+        $this->artisan('telephony:sync-freeswitch-call-uuids')
+            ->assertExitCode(0);
+
+        $callLog->refresh();
+
+        $this->assertSame('fs-uuid-current-snapshot', $callLog->freeswitch_uuid);
+        $this->assertSame(CallStatus::InProgress, $callLog->status);
+        $this->assertNull($callLog->recording_status);
+        $this->assertNull($callLog->recording_file_path);
+    }
+
     public function test_it_syncs_the_real_freeswitch_uuid_from_event_stream_when_channels_snapshot_is_empty(): void
     {
         $organization = Organization::factory()->create();
