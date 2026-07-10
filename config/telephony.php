@@ -21,6 +21,11 @@ return [
         'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
         'base_path' => env('FREESWITCH_CALL_RECORDINGS_BASE_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', storage_path('app/public/recordings/calls'))),
         'retention_days' => (int) env('FREESWITCH_CALL_RECORDING_RETENTION_DAYS', 30),
+        'announcement' => [
+            'enabled' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_ENABLED', true),
+            'default_target' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_DEFAULT_TARGET', 'both'),
+            'default_audio_path' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_DEFAULT_AUDIO_PATH', '/usr/local/freeswitch/sounds/custom/recording_notice.wav'),
+        ],
         'sync' => [
             'enabled' => env('FREESWITCH_CALL_RECORDINGS_AUTO_SYNC', true),
             'host' => env('FREESWITCH_CALL_RECORDINGS_SYNC_HOST', 'sip.classyra.com.ng'),

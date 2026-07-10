@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Api\V1;
 
+use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Enums\MembershipRole;
+use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\Extension;
 use App\Models\Organization;
@@ -12,7 +14,10 @@ use App\Models\OrganizationMembership;
 use App\Models\User;
 use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class CallLogApiTest extends TestCase
@@ -50,6 +55,36 @@ class CallLogApiTest extends TestCase
             'callee_number' => '+1234567890',
             'freeswitch_uuid' => 'fs-call-uuid-1234',
         ]);
+    }
+
+    public function test_member_can_create_a_call_log_without_reusing_another_call_logs_freeswitch_uuid(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callerExtension = Extension::factory()->for($organization)->for($member)->create();
+
+        CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'fs-call-uuid-in-use',
+        ]);
+
+        Sanctum::actingAs($member);
+
+        $response = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs",
+            [
+                'caller_extension_public_id' => $callerExtension->public_id,
+                'caller_number' => $callerExtension->dialableNumber->number,
+                'callee_number' => '+1234567890',
+                'freeswitch_uuid' => 'fs-call-uuid-in-use',
+                'status' => CallStatus::Ringing->value,
+            ]
+        );
+
+        $response->assertCreated()
+            ->assertJsonPath('data.freeswitch_uuid', null);
+
+        $createdCallLog = CallLog::query()->latest('id')->firstOrFail();
+
+        $this->assertNull($createdCallLog->freeswitch_uuid);
     }
 
     public function test_owner_can_list_all_call_logs_in_organization(): void
@@ -463,6 +498,82 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.recording.playback_available', false);
     }
 
+    public function test_index_reconciles_terminal_recordings_that_exist_locally_but_have_stale_metadata(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::Completed->value,
+            'duration' => 9,
+            'recording_file_path' => '2026/07/09/stale.wav',
+            'recording_file_name' => 'stale.wav',
+            'recording_status' => CallRecordingStatus::Orphaned->value,
+            'recording_started_at' => now()->subSeconds(9),
+        ]);
+
+        Storage::disk('freeswitch_call_recordings')->put('2026/07/09/stale.wav', 'fake audio');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs")
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $callLog->public_id)
+            ->assertJsonPath('data.0.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.0.recording.playback_available', true);
+
+        $callLog->refresh();
+
+        $this->assertSame(CallRecordingStatus::Completed, $callLog->recording_status);
+        $this->assertNotNull($callLog->recording_ended_at);
+        $this->assertNotNull($callLog->recording_duration);
+        $this->assertNotNull($callLog->recording_size);
+    }
+
+    public function test_index_hides_duplicate_call_logs_that_share_the_same_freeswitch_uuid(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $playableCallLog = CallLog::factory()->for($organization)->create([
+            'caller_number' => '100000',
+            'callee_number' => '101',
+            'status' => CallStatus::Completed->value,
+            'freeswitch_uuid' => 'duplicate-fs-uuid',
+            'recording_file_path' => '2026/07/09/playable.wav',
+            'recording_file_name' => 'playable.wav',
+            'recording_status' => CallRecordingStatus::Completed->value,
+            'recording_duration' => 10,
+            'recording_size' => 123456,
+            'created_at' => now()->subSeconds(10),
+        ]);
+        $duplicateCallLog = CallLog::factory()->for($organization)->create([
+            'caller_number' => '100000',
+            'callee_number' => '101',
+            'status' => CallStatus::Completed->value,
+            'freeswitch_uuid' => 'duplicate-fs-uuid',
+            'recording_file_path' => '2026/07/09/duplicate.wav',
+            'recording_file_name' => 'duplicate.wav',
+            'recording_status' => CallRecordingStatus::Failed->value,
+            'created_at' => now(),
+        ]);
+
+        Storage::disk('freeswitch_call_recordings')->put('2026/07/09/playable.wav', 'fake audio');
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $playableCallLog->public_id)
+            ->assertJsonPath('data.0.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.0.recording.playback_available', true);
+
+        $duplicateCallLog->refresh();
+
+        $this->assertSame(CallRecordingStatus::Failed, $duplicateCallLog->recording_status);
+    }
+
     public function test_owner_can_update_call_log_without_clearing_existing_freeswitch_uuid(): void
     {
         [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
@@ -494,6 +605,81 @@ class CallLogApiTest extends TestCase
             'duration' => 32,
             'freeswitch_uuid' => 'fs-call-uuid-keep-me',
         ]);
+    }
+
+    public function test_owner_cannot_reassign_another_call_logs_freeswitch_uuid_on_update(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $existingCallLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'fs-call-uuid-in-use',
+        ]);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => null,
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        $this->putJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}",
+            [
+                'status' => CallStatus::Completed->value,
+                'freeswitch_uuid' => 'fs-call-uuid-in-use',
+            ]
+        )->assertOk()
+            ->assertJsonPath('data.freeswitch_uuid', null);
+
+        $callLog->refresh();
+        $existingCallLog->refresh();
+
+        $this->assertNull($callLog->freeswitch_uuid);
+        $this->assertSame('fs-call-uuid-in-use', $existingCallLog->freeswitch_uuid);
+    }
+
+    public function test_terminal_call_update_auto_stops_an_active_recording_and_queues_sync(): void
+    {
+        Bus::fake();
+
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'recording_uuid' => 'fs-call-uuid-1234',
+            'recording_file_path' => '2026/07/10/terminal.wav',
+            'recording_file_name' => 'terminal.wav',
+            'recording_status' => CallRecordingStatus::Recording,
+            'recording_started_at' => now()->subSeconds(6),
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('stopRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath): bool {
+                return $callUuid === 'fs-call-uuid-1234'
+                    && str_ends_with($absolutePath, '2026/07/10/terminal.wav');
+            });
+
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $this->putJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}",
+            [
+                'status' => CallStatus::Completed->value,
+                'ended_at' => now()->toDateTimeString(),
+            ]
+        )->assertOk()
+            ->assertJsonPath('data.status', CallStatus::Completed->value)
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value);
+
+        $callLog->refresh();
+
+        $this->assertSame(CallRecordingStatus::Completed, $callLog->recording_status);
+        $this->assertNotNull($callLog->recording_ended_at);
+
+        Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id;
+        });
     }
 
     public function test_member_cannot_update_others_call_log(): void

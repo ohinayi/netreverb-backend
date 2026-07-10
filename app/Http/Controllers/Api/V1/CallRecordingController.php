@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\CallRecordingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StartCallRecordingRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
@@ -75,6 +76,10 @@ class CallRecordingController extends Controller
         $disk = Storage::disk(config('telephony.call_recordings.disk'));
 
         if (! $disk->exists($callLog->recording_file_path)) {
+            if ($callLog->recording_status === CallRecordingStatus::Completed) {
+                $this->recordingManager->queueSync($callLog);
+            }
+
             abort(404);
         }
 

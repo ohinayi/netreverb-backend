@@ -5,8 +5,11 @@ namespace App\Services\CallRecordings;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallStatus;
+use App\Exceptions\FreeSwitchRecordingException;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
+use App\Models\Organization;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -60,6 +63,7 @@ class CallRecordingManager
         try {
             $absolutePath = $this->storage->absolutePath($callLog);
             $this->storage->ensureDirectoryExists($callLog->recording_file_path ?? '');
+            $this->announceRecordingStart($callLog, $callUuid);
 
             Log::info('Starting FreeSWITCH call recording.', [
                 'call_log_id' => $callLog->id,
@@ -92,6 +96,46 @@ class CallRecordingManager
         return $callLog->refresh();
     }
 
+    private function announceRecordingStart(CallLog $callLog, string $callUuid): void
+    {
+        $organization = $callLog->organization;
+
+        if (! $organization instanceof Organization || ! $organization->shouldAnnounceCallRecording()) {
+            return;
+        }
+
+        $audioPath = $organization->callRecordingAnnouncementAudioPath();
+
+        if ($audioPath === null) {
+            Log::warning('Call recording announcement is enabled but no audio path is configured.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'organization_id' => $organization->public_id,
+            ]);
+
+            return;
+        }
+
+        try {
+            $this->gateway->announceRecordingStart(
+                $callUuid,
+                $audioPath,
+                $organization->callRecordingAnnouncementTarget()->value,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('FreeSWITCH call recording announcement failed.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'organization_id' => $organization->public_id,
+                'recording_uuid' => $callUuid,
+                'announcement_audio_path' => $audioPath,
+                'announcement_target' => $organization->callRecordingAnnouncementTarget()->value,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     public function stop(CallLog $callLog): ?CallLog
     {
         $callLog = DB::transaction(function () use ($callLog): ?CallLog {
@@ -112,9 +156,11 @@ class CallRecordingManager
             return $callLog;
         }
 
-        try {
-            $absolutePath = $this->storage->absolutePath($callLog);
+        $absolutePath = $this->storage->absolutePath($callLog);
+        $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
+        $endedAt = now();
 
+        try {
             Log::info('Stopping FreeSWITCH call recording.', [
                 'call_log_id' => $callLog->id,
                 'public_id' => $callLog->public_id,
@@ -124,30 +170,36 @@ class CallRecordingManager
             ]);
 
             $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath);
-            $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
-            $endedAt = now();
-            $recordingExistsLocally = $this->storage->exists($callLog);
-
-            $callLog->forceFill([
-                'recording_status' => CallRecordingStatus::Completed,
-                'recording_ended_at' => $endedAt,
-                'recording_duration' => max(0, $startedAt->diffInSeconds($endedAt)),
-                'recording_size' => $recordingExistsLocally ? $this->storage->size($callLog) : null,
-            ])->save();
-
-            if (! $recordingExistsLocally) {
-                Log::warning('Call recording completed before the file became available on the application disk.', [
+            $this->finalizeStoppedRecording($callLog, $startedAt, $endedAt);
+        } catch (FreeSwitchRecordingException $exception) {
+            if ($this->sessionAlreadyEnded($exception)) {
+                Log::warning('FreeSWITCH recording stop was requested after the session ended. Finalizing metadata and syncing from the VPS.', [
                     'call_log_id' => $callLog->id,
                     'public_id' => $callLog->public_id,
                     'recording_id' => $callLog->recording_id,
                     'recording_uuid' => $callLog->recording_uuid,
                     'recording_file_path' => $callLog->recording_file_path,
+                    'message' => $exception->getMessage(),
                 ]);
+
+                $this->finalizeStoppedRecording($callLog, $startedAt, $endedAt);
+
+                return $callLog->refresh();
             }
 
-            if ($callLog->recording_file_path !== null && $callLog->recording_file_path !== '') {
-                $this->dispatcher->dispatchAfterResponse(new SyncCallRecordingFromVps($callLog->id));
-            }
+            $callLog->forceFill([
+                'recording_status' => CallRecordingStatus::Orphaned,
+            ])->save();
+
+            Log::warning('FreeSWITCH call recording stop failed.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callLog->recording_uuid,
+                'recording_file_path' => $callLog->recording_file_path,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
         } catch (Throwable $exception) {
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Orphaned,
@@ -163,6 +215,53 @@ class CallRecordingManager
                 'message' => $exception->getMessage(),
             ]);
         }
+
+        return $callLog->refresh();
+    }
+
+    public function queueSync(CallLog $callLog): void
+    {
+        if ($callLog->recording_file_path === null || $callLog->recording_file_path === '') {
+            return;
+        }
+
+        $this->dispatcher->dispatchAfterResponse(new SyncCallRecordingFromVps($callLog->id));
+    }
+
+    public function reconcileCompletedRecordingMetadata(CallLog $callLog): CallLog
+    {
+        if ($callLog->recording_file_path === null || $callLog->recording_file_path === '') {
+            return $callLog;
+        }
+
+        if (! $this->isTerminalCallStatus($callLog->status)) {
+            return $callLog;
+        }
+
+        if (! $this->storage->exists($callLog)) {
+            return $callLog;
+        }
+
+        if ($callLog->recording_status === CallRecordingStatus::Completed
+            && $callLog->recording_size !== null
+            && $callLog->recording_duration !== null) {
+            return $callLog;
+        }
+
+        $endedAt = $callLog->recording_ended_at
+            ?? $callLog->ended_at
+            ?? $callLog->updated_at
+            ?? now();
+        $startedAt = $callLog->recording_started_at
+            ?? $callLog->created_at
+            ?? $endedAt;
+
+        $callLog->forceFill([
+            'recording_status' => CallRecordingStatus::Completed,
+            'recording_ended_at' => $endedAt,
+            'recording_duration' => max(0, $startedAt->diffInSeconds($endedAt)),
+            'recording_size' => $this->storage->size($callLog),
+        ])->save();
 
         return $callLog->refresh();
     }
@@ -301,5 +400,47 @@ class CallRecordingManager
             && $callLog->recording_file_path !== ''
             && $callLog->recording_file_name !== null
             && $callLog->recording_file_name !== '';
+    }
+
+    private function finalizeStoppedRecording(CallLog $callLog, Carbon $startedAt, Carbon $endedAt): void
+    {
+        $recordingExistsLocally = $this->storage->exists($callLog);
+
+        $callLog->forceFill([
+            'recording_status' => CallRecordingStatus::Completed,
+            'recording_ended_at' => $endedAt,
+            'recording_duration' => max(0, $startedAt->diffInSeconds($endedAt)),
+            'recording_size' => $recordingExistsLocally ? $this->storage->size($callLog) : null,
+        ])->save();
+
+        if (! $recordingExistsLocally) {
+            Log::warning('Call recording completed before the file became available on the application disk.', [
+                'call_log_id' => $callLog->id,
+                'public_id' => $callLog->public_id,
+                'recording_id' => $callLog->recording_id,
+                'recording_uuid' => $callLog->recording_uuid,
+                'recording_file_path' => $callLog->recording_file_path,
+            ]);
+        }
+
+        $this->queueSync($callLog);
+    }
+
+    private function sessionAlreadyEnded(FreeSwitchRecordingException $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'Cannot locate session!');
+    }
+
+    private function isTerminalCallStatus(CallStatus|string|null $status): bool
+    {
+        $value = $status instanceof \BackedEnum ? $status->value : $status;
+
+        return in_array($value, [
+            CallStatus::Completed->value,
+            CallStatus::Busy->value,
+            CallStatus::Failed->value,
+            CallStatus::NoAnswer->value,
+            CallStatus::Canceled->value,
+        ], true);
     }
 }

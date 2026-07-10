@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\V1;
 
+use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\MembershipRole;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
@@ -75,5 +76,37 @@ class OrganizationApiTest extends TestCase
         $this->patchJson("/api/v1/organizations/{$organization->public_id}", [
             'name' => 'Unauthorized Change',
         ])->assertForbidden();
+    }
+
+    public function test_admin_can_update_call_recording_announcement_settings(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+
+        Sanctum::actingAs($admin);
+
+        $this->patchJson("/api/v1/organizations/{$organization->public_id}", [
+            'settings' => [
+                'call_recording_announcement' => [
+                    'enabled' => true,
+                    'target' => CallRecordingAnnouncementTarget::Caller->value,
+                    'audio_path' => '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
+                ],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.settings.call_recording_announcement.enabled', true)
+            ->assertJsonPath('data.settings.call_recording_announcement.target', CallRecordingAnnouncementTarget::Caller->value)
+            ->assertJsonPath('data.settings.call_recording_announcement.audio_path', '/usr/local/freeswitch/sounds/custom/recording_notice.wav');
+
+        $organization->refresh();
+
+        $this->assertSame([
+            'call_recording_announcement' => [
+                'enabled' => true,
+                'target' => CallRecordingAnnouncementTarget::Caller->value,
+                'audio_path' => '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
+            ],
+        ], $organization->settings);
     }
 }

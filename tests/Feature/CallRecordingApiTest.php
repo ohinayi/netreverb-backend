@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\CallRecordingStatus;
+use App\Exceptions\FreeSwitchRecordingException;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\Organization;
@@ -24,6 +26,9 @@ class CallRecordingApiTest extends TestCase
     {
         Storage::fake('freeswitch_call_recordings');
         Bus::fake();
+        config()->set('telephony.call_recordings.announcement.enabled', true);
+        config()->set('telephony.call_recordings.announcement.default_target', CallRecordingAnnouncementTarget::Both->value);
+        config()->set('telephony.call_recordings.announcement.default_audio_path', '/usr/local/freeswitch/sounds/custom/recording_notice.wav');
 
         $owner = User::factory()->create();
         $organization = Organization::factory()->create();
@@ -38,6 +43,14 @@ class CallRecordingApiTest extends TestCase
 
         $gateway = Mockery::mock(FreeSwitchCallGateway::class);
         $recordingPath = null;
+
+        $gateway->shouldReceive('announceRecordingStart')
+            ->once()
+            ->with(
+                'call-uuid-1234',
+                '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
+                CallRecordingAnnouncementTarget::Both->value,
+            );
 
         $gateway->shouldReceive('startRecording')
             ->once()
@@ -157,6 +170,75 @@ class CallRecordingApiTest extends TestCase
         )->assertOk()
             ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
             ->assertJsonPath('data.recording.playback_available', false);
+
+        Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id;
+        });
+    }
+
+    public function test_stop_recording_still_completes_when_the_freeswitch_session_has_already_ended(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+        Bus::fake();
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'call-uuid-1234',
+            'recording_uuid' => 'call-uuid-1234',
+            'recording_file_path' => '2026/07/10/recoverable.wav',
+            'recording_file_name' => 'recoverable.wav',
+            'recording_status' => CallRecordingStatus::Recording,
+            'recording_started_at' => now()->subSeconds(9),
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('stopRecording')
+            ->once()
+            ->andThrow(FreeSwitchRecordingException::commandFailed(
+                'uuid_record call-uuid-1234 stop /path/to/recoverable.wav',
+                '-ERR Cannot locate session!',
+            ));
+
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/stop",
+        )->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.recording.playback_available', false);
+
+        $callLog->refresh();
+
+        $this->assertSame(CallRecordingStatus::Completed, $callLog->recording_status);
+        $this->assertNotNull($callLog->recording_ended_at);
+
+        Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id;
+        });
+    }
+
+    public function test_show_queues_a_sync_when_a_completed_recording_is_missing_locally(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+        Bus::fake();
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'recording_file_path' => '2026/07/10/missing.wav',
+            'recording_file_name' => 'missing.wav',
+            'recording_status' => CallRecordingStatus::Completed,
+        ]);
+
+        $this->get("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording")
+            ->assertNotFound();
 
         Bus::assertDispatchedAfterResponse(SyncCallRecordingFromVps::class, function (SyncCallRecordingFromVps $job) use ($callLog): bool {
             return $job->callLogId === $callLog->id;

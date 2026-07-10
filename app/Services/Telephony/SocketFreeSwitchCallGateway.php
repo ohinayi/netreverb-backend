@@ -9,6 +9,28 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
 {
     public function __construct(private readonly FreeSwitchEventSocketClient $client) {}
 
+    public function announceRecordingStart(string $callUuid, string $audioPath, string $target): void
+    {
+        $legs = match ($target) {
+            'caller' => ['aleg'],
+            'callee' => ['bleg'],
+            default => ['aleg', 'bleg'],
+        };
+
+        foreach ($legs as $leg) {
+            $command = sprintf(
+                'uuid_broadcast %s %s %s',
+                $callUuid,
+                $audioPath,
+                $leg,
+            );
+
+            $response = $this->client->api($command);
+
+            $this->assertSuccessfulResponse($command, $response);
+        }
+    }
+
     public function startRecording(string $callUuid, string $absolutePath): void
     {
         $command = sprintf(

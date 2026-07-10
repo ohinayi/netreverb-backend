@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\ExtensionProvisioningMode;
 use App\Enums\MembershipStatus;
 use App\Enums\OrganizationStatus;
@@ -81,6 +82,47 @@ class Organization extends Model
     public function callLogs(): HasMany
     {
         return $this->hasMany(CallLog::class);
+    }
+
+    /**
+     * @return array{enabled: bool, target: string, audio_path: ?string}
+     */
+    public function callRecordingAnnouncementSettings(): array
+    {
+        $settings = is_array($this->settings) ? $this->settings : [];
+        $announcementSettings = $settings['call_recording_announcement'] ?? [];
+
+        if (! is_array($announcementSettings)) {
+            $announcementSettings = [];
+        }
+
+        $defaultEnabled = (bool) config('telephony.call_recordings.announcement.enabled', true);
+        $defaultTarget = (string) config('telephony.call_recordings.announcement.default_target', CallRecordingAnnouncementTarget::Both->value);
+        $defaultAudioPath = config('telephony.call_recordings.announcement.default_audio_path');
+        $audioPath = $announcementSettings['audio_path'] ?? $defaultAudioPath;
+
+        return [
+            'enabled' => (bool) ($announcementSettings['enabled'] ?? $defaultEnabled),
+            'target' => (string) ($announcementSettings['target'] ?? $defaultTarget),
+            'audio_path' => is_string($audioPath) && trim($audioPath) !== '' ? trim($audioPath) : null,
+        ];
+    }
+
+    public function shouldAnnounceCallRecording(): bool
+    {
+        return $this->callRecordingAnnouncementSettings()['enabled'];
+    }
+
+    public function callRecordingAnnouncementTarget(): CallRecordingAnnouncementTarget
+    {
+        return CallRecordingAnnouncementTarget::tryFrom(
+            $this->callRecordingAnnouncementSettings()['target'],
+        ) ?? CallRecordingAnnouncementTarget::Both;
+    }
+
+    public function callRecordingAnnouncementAudioPath(): ?string
+    {
+        return $this->callRecordingAnnouncementSettings()['audio_path'];
     }
 
     public function scopeVisibleTo(Builder $query, User $user): Builder

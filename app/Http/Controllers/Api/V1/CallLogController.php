@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
@@ -16,8 +17,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class CallLogController extends Controller
 {
@@ -75,6 +78,11 @@ class CallLogController extends Controller
 
         $callLogs = $callLogQuery->paginate(10);
 
+        $callLogs->getCollection()->transform(function (CallLog $callLog): CallLog {
+            return $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
+        });
+        $callLogs->setCollection($this->deduplicateCallLogs($callLogs->getCollection()));
+
         Log::info('Call log index retrieved.', [
             'organization_id' => $organization->public_id,
             'call_log_count' => $callLogs->count(),
@@ -106,6 +114,8 @@ class CallLogController extends Controller
                 ->value('id');
         }
         unset($data['callee_extension_public_id']);
+
+        $data = $this->stripDuplicateFreeSwitchUuid($data);
 
         $callLog = $organization->callLogs()->create($data);
         $this->prepareRecordingInfrastructure($callLog);
@@ -142,6 +152,8 @@ class CallLogController extends Controller
             $callLog->refresh();
         }
 
+        $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
+
         return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
     }
 
@@ -156,13 +168,26 @@ class CallLogController extends Controller
         Gate::authorize('update', $callLog);
 
         $data = $request->validated();
+        $recordingWasActive = in_array($callLog->recording_status, [CallRecordingStatus::Starting, CallRecordingStatus::Recording], true);
 
         if (array_key_exists('freeswitch_uuid', $data) && $data['freeswitch_uuid'] === null) {
             unset($data['freeswitch_uuid']);
         }
 
+        $data = $this->stripDuplicateFreeSwitchUuid($data, $callLog);
+
         $callLog->update($data);
-        $this->prepareRecordingInfrastructure($callLog->refresh());
+        $callLog->refresh();
+        $this->prepareRecordingInfrastructure($callLog);
+
+        if ($recordingWasActive && $this->isTerminalCallStatus($callLog->status)) {
+            $this->recordingManager->stop($callLog);
+            $callLog->refresh();
+        } elseif ($callLog->recording_status === CallRecordingStatus::Completed) {
+            $this->recordingManager->queueSync($callLog);
+        }
+
+        $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
 
         Log::info('Call log updated.', [
             'call_log_id' => $callLog->public_id,
@@ -200,5 +225,93 @@ class CallLogController extends Controller
         }
 
         $this->recordingManager->prepare($callLog, $callUuid);
+    }
+
+    private function isTerminalCallStatus(CallStatus|string|null $status): bool
+    {
+        $value = $status instanceof \BackedEnum ? $status->value : $status;
+
+        return in_array($value, [
+            CallStatus::Completed->value,
+            CallStatus::Busy->value,
+            CallStatus::Failed->value,
+            CallStatus::NoAnswer->value,
+            CallStatus::Canceled->value,
+        ], true);
+    }
+
+    /**
+     * @param  Collection<int, CallLog>  $callLogs
+     * @return Collection<int, CallLog>
+     */
+    private function deduplicateCallLogs(Collection $callLogs): Collection
+    {
+        return $callLogs
+            ->sortByDesc(fn (CallLog $callLog): int => $this->callLogDisplayPriority($callLog))
+            ->unique(fn (CallLog $callLog): string => $callLog->freeswitch_uuid ?? $callLog->public_id)
+            ->sortByDesc(fn (CallLog $callLog): int => $callLog->created_at?->getTimestamp() ?? 0)
+            ->values();
+    }
+
+    private function callLogDisplayPriority(CallLog $callLog): int
+    {
+        $priority = 0;
+
+        if ($callLog->recording_status === CallRecordingStatus::Completed) {
+            $priority += 300;
+
+            if ($callLog->recording_file_path !== null
+                && Storage::disk(config('telephony.call_recordings.disk'))->exists($callLog->recording_file_path)) {
+                $priority += 100;
+            }
+        } elseif ($callLog->recording_status === CallRecordingStatus::Recording
+            || $callLog->recording_status === CallRecordingStatus::Starting) {
+            $priority += 200;
+        } elseif ($callLog->recording_status === CallRecordingStatus::Failed
+            || $callLog->recording_status === CallRecordingStatus::Orphaned) {
+            $priority += 50;
+        }
+
+        if ($this->isTerminalCallStatus($callLog->status)) {
+            $priority += 25;
+        }
+
+        return $priority;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function stripDuplicateFreeSwitchUuid(array $data, ?CallLog $currentCallLog = null): array
+    {
+        $freeswitchUuid = $data['freeswitch_uuid'] ?? null;
+
+        if (! is_string($freeswitchUuid) || trim($freeswitchUuid) === '') {
+            return $data;
+        }
+
+        $owner = CallLog::query()
+            ->where('freeswitch_uuid', trim($freeswitchUuid))
+            ->when(
+                $currentCallLog !== null,
+                fn ($query) => $query->whereKeyNot($currentCallLog->getKey()),
+            )
+            ->select(['id', 'public_id'])
+            ->first();
+
+        if ($owner === null) {
+            return $data;
+        }
+
+        unset($data['freeswitch_uuid']);
+
+        Log::warning('Ignoring duplicate FreeSWITCH UUID on call log write.', [
+            'freeswitch_uuid' => $freeswitchUuid,
+            'existing_call_log_id' => $owner->public_id,
+            'current_call_log_id' => $currentCallLog?->public_id,
+        ]);
+
+        return $data;
     }
 }
