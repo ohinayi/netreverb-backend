@@ -29,6 +29,15 @@ class WebRtcBootstrapApiTest extends TestCase
         config()->set([
             'telephony.turn.secret' => 'test-turn-shared-secret',
             'telephony.turn.ttl' => 600,
+            'telephony.webrtc.video_enabled' => true,
+            'telephony.webrtc.video_max_bitrate_kbps' => 1800,
+            'telephony.webrtc.video.width.ideal' => 1280,
+            'telephony.webrtc.video.width.max' => 1920,
+            'telephony.webrtc.video.height.ideal' => 720,
+            'telephony.webrtc.video.height.max' => 1080,
+            'telephony.webrtc.video.frame_rate.ideal' => 24,
+            'telephony.webrtc.video.frame_rate.max' => 30,
+            'telephony.webrtc.video.facing_mode' => 'user',
         ]);
         [$user, $organization, $extension] = $this->assignedExtension();
         Sanctum::actingAs($user);
@@ -52,6 +61,7 @@ class WebRtcBootstrapApiTest extends TestCase
                     'password' => 'sip-secret',
                     'realm' => 'sip.classyra.com.ng',
                     'expires' => 300,
+                    'supports_video' => true,
                 ],
                 'iceServers' => [
                     [
@@ -69,8 +79,47 @@ class WebRtcBootstrapApiTest extends TestCase
                         'credential' => $turnCredential,
                     ],
                 ],
+                'media' => [
+                    'audio' => [
+                        'enabled' => true,
+                    ],
+                    'video' => [
+                        'enabled' => true,
+                        'constraints' => [
+                            'width' => [
+                                'ideal' => 1280,
+                                'max' => 1920,
+                            ],
+                            'height' => [
+                                'ideal' => 720,
+                                'max' => 1080,
+                            ],
+                            'frameRate' => [
+                                'ideal' => 24,
+                                'max' => 30,
+                            ],
+                            'facingMode' => 'user',
+                        ],
+                        'max_bitrate_kbps' => 1800,
+                    ],
+                ],
                 'expires_at' => $expiresAt,
             ]);
+    }
+
+    public function test_bootstrap_can_disable_video_capabilities(): void
+    {
+        config()->set([
+            'telephony.turn.secret' => 'test-turn-shared-secret',
+            'telephony.webrtc.video_enabled' => false,
+        ]);
+        [$user] = $this->assignedExtension();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/webrtc/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('sip.supports_video', false)
+            ->assertJsonPath('media.video.enabled', false);
     }
 
     public function test_user_must_select_an_extension_when_multiple_are_assigned(): void

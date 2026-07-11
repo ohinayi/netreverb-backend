@@ -28,6 +28,7 @@ class BuildWebRtcBootstrap
                 'password' => $extension->credential->password,
                 'realm' => $extension->dialableNumber->realm,
                 'expires' => config('telephony.sip_registration_expires'),
+                'supports_video' => (bool) config('telephony.webrtc.video_enabled', true),
             ],
             'iceServers' => [
                 [
@@ -43,6 +44,30 @@ class BuildWebRtcBootstrap
                     ],
                     'username' => $turnUsername,
                     'credential' => $turnCredential,
+                ],
+            ],
+            'media' => [
+                'audio' => [
+                    'enabled' => true,
+                ],
+                'video' => [
+                    'enabled' => (bool) config('telephony.webrtc.video_enabled', true),
+                    'constraints' => [
+                        'width' => [
+                            'ideal' => (int) config('telephony.webrtc.video.width.ideal', 1280),
+                            'max' => (int) config('telephony.webrtc.video.width.max', 1920),
+                        ],
+                        'height' => [
+                            'ideal' => (int) config('telephony.webrtc.video.height.ideal', 720),
+                            'max' => (int) config('telephony.webrtc.video.height.max', 1080),
+                        ],
+                        'frameRate' => [
+                            'ideal' => (int) config('telephony.webrtc.video.frame_rate.ideal', 24),
+                            'max' => (int) config('telephony.webrtc.video.frame_rate.max', 30),
+                        ],
+                        'facingMode' => (string) config('telephony.webrtc.video.facing_mode', 'user'),
+                    ],
+                    'max_bitrate_kbps' => (int) config('telephony.webrtc.video_max_bitrate_kbps', 1500),
                 ],
             ],
             'expires_at' => $expiresAt,

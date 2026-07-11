@@ -48,4 +48,23 @@ return [
         'ttl' => min(600, max(300, (int) env('TURN_CREDENTIAL_TTL', 600))),
         'fallback_stun_url' => env('FALLBACK_STUN_URL', 'stun:stun.l.google.com:19302'),
     ],
+    'webrtc' => [
+        'video_enabled' => env('WEBRTC_VIDEO_ENABLED', true),
+        'video_max_bitrate_kbps' => (int) env('WEBRTC_VIDEO_MAX_BITRATE_KBPS', 1500),
+        'video' => [
+            'width' => [
+                'ideal' => (int) env('WEBRTC_VIDEO_WIDTH_IDEAL', 1280),
+                'max' => (int) env('WEBRTC_VIDEO_WIDTH_MAX', 1920),
+            ],
+            'height' => [
+                'ideal' => (int) env('WEBRTC_VIDEO_HEIGHT_IDEAL', 720),
+                'max' => (int) env('WEBRTC_VIDEO_HEIGHT_MAX', 1080),
+            ],
+            'frame_rate' => [
+                'ideal' => (int) env('WEBRTC_VIDEO_FRAME_RATE_IDEAL', 24),
+                'max' => (int) env('WEBRTC_VIDEO_FRAME_RATE_MAX', 30),
+            ],
+            'facing_mode' => env('WEBRTC_VIDEO_FACING_MODE', 'user'),
+        ],
+    ],
 ];
