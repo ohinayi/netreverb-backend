@@ -51,6 +51,19 @@ return [
     'webrtc' => [
         'video_enabled' => env('WEBRTC_VIDEO_ENABLED', true),
         'video_max_bitrate_kbps' => (int) env('WEBRTC_VIDEO_MAX_BITRATE_KBPS', 1500),
+        'recording' => [
+            'direct_audio_enabled' => env('WEBRTC_RECORDING_DIRECT_AUDIO_ENABLED', true),
+            'direct_video_enabled' => env('WEBRTC_RECORDING_DIRECT_VIDEO_ENABLED', false),
+            'direct_audio_container' => env('WEBRTC_RECORDING_DIRECT_AUDIO_CONTAINER', 'wav'),
+            'direct_video_container' => env('WEBRTC_RECORDING_DIRECT_VIDEO_CONTAINER', 'mp4'),
+            'direct_video_start_command_template' => env('WEBRTC_RECORDING_DIRECT_VIDEO_START_COMMAND_TEMPLATE'),
+            'direct_video_stop_command_template' => env('WEBRTC_RECORDING_DIRECT_VIDEO_STOP_COMMAND_TEMPLATE'),
+            'conference_audio_enabled' => env('WEBRTC_RECORDING_CONFERENCE_AUDIO_ENABLED', true),
+            'conference_video_enabled' => env('WEBRTC_RECORDING_CONFERENCE_VIDEO_ENABLED', false),
+            'conference_screen_share_enabled' => env('WEBRTC_RECORDING_CONFERENCE_SCREEN_SHARE_ENABLED', false),
+            'conference_audio_container' => env('WEBRTC_RECORDING_CONFERENCE_AUDIO_CONTAINER', 'wav'),
+            'conference_video_container' => env('WEBRTC_RECORDING_CONFERENCE_VIDEO_CONTAINER', 'mp4'),
+        ],
         'video' => [
             'width' => [
                 'ideal' => (int) env('WEBRTC_VIDEO_WIDTH_IDEAL', 1280),

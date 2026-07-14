@@ -31,6 +31,17 @@ class WebRtcBootstrapApiTest extends TestCase
             'telephony.turn.ttl' => 600,
             'telephony.webrtc.video_enabled' => true,
             'telephony.webrtc.video_max_bitrate_kbps' => 1800,
+            'telephony.webrtc.recording.direct_audio_enabled' => true,
+            'telephony.webrtc.recording.direct_video_enabled' => false,
+            'telephony.webrtc.recording.direct_audio_container' => 'wav',
+            'telephony.webrtc.recording.direct_video_container' => 'mp4',
+            'telephony.webrtc.recording.direct_video_start_command_template' => 'api start-video {call_uuid} {absolute_output_path} {container}',
+            'telephony.webrtc.recording.direct_video_stop_command_template' => 'api stop-video {call_uuid} {absolute_output_path} {container}',
+            'telephony.webrtc.recording.conference_audio_enabled' => true,
+            'telephony.webrtc.recording.conference_video_enabled' => false,
+            'telephony.webrtc.recording.conference_screen_share_enabled' => false,
+            'telephony.webrtc.recording.conference_audio_container' => 'wav',
+            'telephony.webrtc.recording.conference_video_container' => 'mp4',
             'telephony.webrtc.video.width.ideal' => 1280,
             'telephony.webrtc.video.width.max' => 1920,
             'telephony.webrtc.video.height.ideal' => 720,
@@ -103,6 +114,31 @@ class WebRtcBootstrapApiTest extends TestCase
                         'max_bitrate_kbps' => 1800,
                     ],
                 ],
+                'calling' => [
+                    'default_media_type' => 'audio',
+                    'default_session_type' => 'direct',
+                    'supported_media_types' => [
+                        'audio',
+                        'video',
+                    ],
+                    'supported_session_types' => [
+                        'direct',
+                        'conference',
+                    ],
+                    'screen_share_requires_conference' => true,
+                    'recording' => [
+                        'direct_audio' => true,
+                        'direct_video' => false,
+                        'conference' => true,
+                        'direct_audio_container' => 'wav',
+                        'direct_video_container' => 'mp4',
+                        'conference_audio' => true,
+                        'conference_video' => false,
+                        'conference_screen_share' => false,
+                        'conference_audio_container' => 'wav',
+                        'conference_video_container' => 'mp4',
+                    ],
+                ],
                 'expires_at' => $expiresAt,
             ]);
     }
@@ -119,7 +155,34 @@ class WebRtcBootstrapApiTest extends TestCase
         $this->getJson('/api/v1/webrtc/bootstrap')
             ->assertOk()
             ->assertJsonPath('sip.supports_video', false)
-            ->assertJsonPath('media.video.enabled', false);
+            ->assertJsonPath('media.video.enabled', false)
+            ->assertJsonPath('calling.screen_share_requires_conference', true)
+            ->assertJsonPath('calling.recording.direct_video', false);
+    }
+
+    public function test_bootstrap_only_enables_direct_video_recording_when_voip_templates_are_configured(): void
+    {
+        config()->set([
+            'telephony.turn.secret' => 'test-turn-shared-secret',
+            'telephony.webrtc.recording.direct_video_enabled' => true,
+            'telephony.webrtc.recording.direct_video_start_command_template' => null,
+            'telephony.webrtc.recording.direct_video_stop_command_template' => null,
+        ]);
+        [$user] = $this->assignedExtension();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/webrtc/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('calling.recording.direct_video', false);
+
+        config()->set([
+            'telephony.webrtc.recording.direct_video_start_command_template' => 'luarun recorder_start.lua {call_uuid} {absolute_output_path} {container}',
+            'telephony.webrtc.recording.direct_video_stop_command_template' => 'luarun recorder_stop.lua {call_uuid} {absolute_output_path} {container}',
+        ]);
+
+        $this->getJson('/api/v1/webrtc/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('calling.recording.direct_video', true);
     }
 
     public function test_user_must_select_an_extension_when_multiple_are_assigned(): void

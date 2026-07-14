@@ -3,6 +3,7 @@
 namespace App\Contracts\Recordings;
 
 use App\Data\CallRecordingLocation;
+use App\Data\CallRecordingProfile;
 use App\Models\CallLog;
 use Carbon\CarbonInterface;
 
@@ -11,6 +12,7 @@ interface CallRecordingStorage
     public function buildLocation(
         CallLog $callLog,
         string $callUuid,
+        CallRecordingProfile $profile,
         CarbonInterface $recordedAt,
     ): CallRecordingLocation;
 

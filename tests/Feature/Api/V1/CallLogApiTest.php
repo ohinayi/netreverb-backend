@@ -3,7 +3,10 @@
 namespace Tests\Feature\Api\V1;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Enums\CallMediaType;
+use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Enums\MembershipRole;
 use App\Jobs\SyncCallRecordingFromVps;
@@ -38,6 +41,8 @@ class CallLogApiTest extends TestCase
                 'callee_number' => '+1234567890',
                 'freeswitch_uuid' => 'fs-call-uuid-1234',
                 'status' => CallStatus::Ringing->value,
+                'media_type' => CallMediaType::Video->value,
+                'session_type' => CallSessionType::Direct->value,
                 'started_at' => now()->toDateTimeString(),
             ]
         );
@@ -46,7 +51,9 @@ class CallLogApiTest extends TestCase
             ->assertJsonPath('data.caller_number', $callerExtension->dialableNumber->number)
             ->assertJsonPath('data.callee_number', '+1234567890')
             ->assertJsonPath('data.freeswitch_uuid', 'fs-call-uuid-1234')
-            ->assertJsonPath('data.status', CallStatus::Ringing->value);
+            ->assertJsonPath('data.status', CallStatus::Ringing->value)
+            ->assertJsonPath('data.media_type', CallMediaType::Video->value)
+            ->assertJsonPath('data.session_type', CallSessionType::Direct->value);
 
         $this->assertDatabaseHas('call_logs', [
             'organization_id' => $organization->id,
@@ -54,7 +61,49 @@ class CallLogApiTest extends TestCase
             'caller_number' => $callerExtension->dialableNumber->number,
             'callee_number' => '+1234567890',
             'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'media_type' => CallMediaType::Video->value,
+            'session_type' => CallSessionType::Direct->value,
         ]);
+    }
+
+    public function test_call_log_defaults_to_audio_direct_metadata_when_not_provided(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callerExtension = Extension::factory()->for($organization)->for($member)->create();
+        Sanctum::actingAs($member);
+
+        $response = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs",
+            [
+                'caller_extension_public_id' => $callerExtension->public_id,
+                'caller_number' => $callerExtension->dialableNumber->number,
+                'callee_number' => '+1234567890',
+                'status' => CallStatus::Ringing->value,
+            ]
+        );
+
+        $response->assertCreated()
+            ->assertJsonPath('data.media_type', CallMediaType::Audio->value)
+            ->assertJsonPath('data.session_type', CallSessionType::Direct->value);
+    }
+
+    public function test_completed_recording_exposes_media_metadata(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'recording_file_path' => '2026/07/12/test.wav',
+            'recording_file_name' => 'test.wav',
+            'recording_status' => CallRecordingStatus::Completed,
+            'recording_media_type' => CallRecordingMediaType::Audio,
+            'recording_container' => 'wav',
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.recording.media_type', CallRecordingMediaType::Audio->value)
+            ->assertJsonPath('data.recording.container', 'wav');
     }
 
     public function test_member_can_create_a_call_log_without_reusing_another_call_logs_freeswitch_uuid(): void

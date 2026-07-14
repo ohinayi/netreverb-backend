@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Data\CallRecordingProfile;
+use App\Enums\CallMediaType;
 use App\Enums\CallRecordingAnnouncementTarget;
+use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
 use App\Exceptions\FreeSwitchRecordingException;
 use App\Jobs\SyncCallRecordingFromVps;
@@ -54,17 +57,22 @@ class CallRecordingApiTest extends TestCase
 
         $gateway->shouldReceive('startRecording')
             ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath) use (&$recordingPath): bool {
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile) use (&$recordingPath): bool {
                 $recordingPath = $absolutePath;
 
-                return $callUuid === 'call-uuid-1234' && str_ends_with($absolutePath, '.wav');
+                return $callUuid === 'call-uuid-1234'
+                    && str_ends_with($absolutePath, '.wav')
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
             });
 
         $gateway->shouldReceive('stopRecording')
             ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath) use (&$recordingPath): bool {
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile) use (&$recordingPath): bool {
                 return $callUuid === 'call-uuid-1234'
-                    && $absolutePath === $recordingPath;
+                    && $absolutePath === $recordingPath
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
             });
 
         $this->app->instance(FreeSwitchCallGateway::class, $gateway);
@@ -116,6 +124,50 @@ class CallRecordingApiTest extends TestCase
         $this->assertNull($callLog->recording_uuid);
     }
 
+    public function test_video_direct_call_uses_video_recording_profile_when_enabled(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+        config()->set('telephony.webrtc.recording.direct_video_enabled', true);
+        config()->set('telephony.webrtc.recording.direct_video_container', 'mp4');
+        config()->set('telephony.webrtc.recording.direct_video_start_command_template', 'luarun video_start.lua {call_uuid} {absolute_output_path} {container}');
+        config()->set('telephony.webrtc.recording.direct_video_stop_command_template', 'luarun video_stop.lua {call_uuid} {absolute_output_path} {container}');
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'call-uuid-video-1234',
+            'media_type' => CallMediaType::Video,
+            'recording_status' => null,
+            'recording_url' => null,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+
+        $gateway->shouldReceive('announceRecordingStart')->once();
+        $gateway->shouldReceive('startRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
+                return $callUuid === 'call-uuid-video-1234'
+                    && str_ends_with($absolutePath, '.mp4')
+                    && $profile->mediaType === CallRecordingMediaType::Video
+                    && $profile->container === 'mp4';
+            });
+
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        $response = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/start",
+            [],
+        )->assertOk()
+            ->assertJsonPath('data.recording.media_type', CallRecordingMediaType::Video->value)
+            ->assertJsonPath('data.recording.container', 'mp4');
+
+        $this->assertStringEndsWith('.mp4', $response->json('data.recording.file_name'));
+    }
+
     public function test_start_recording_requires_a_freeswitch_uuid(): void
     {
         Storage::fake('freeswitch_call_recordings');
@@ -158,9 +210,10 @@ class CallRecordingApiTest extends TestCase
         $gateway = Mockery::mock(FreeSwitchCallGateway::class);
         $gateway->shouldReceive('stopRecording')
             ->once()
-            ->withArgs(function (string $callUuid, string $absolutePath): bool {
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
                 return $callUuid === 'call-uuid-1234'
-                    && str_ends_with($absolutePath, '2026/06/30/missing.wav');
+                    && str_ends_with($absolutePath, '2026/06/30/missing.wav')
+                    && $profile->mediaType === CallRecordingMediaType::Audio;
             });
 
         $this->app->instance(FreeSwitchCallGateway::class, $gateway);

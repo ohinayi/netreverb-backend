@@ -3,7 +3,10 @@
 namespace App\Services\Telephony;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Data\CallRecordingProfile;
+use App\Enums\CallRecordingMediaType;
 use App\Exceptions\FreeSwitchRecordingException;
+use RuntimeException;
 
 class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
 {
@@ -31,12 +34,13 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
         }
     }
 
-    public function startRecording(string $callUuid, string $absolutePath): void
+    public function startRecording(string $callUuid, string $absolutePath, CallRecordingProfile $profile): void
     {
-        $command = sprintf(
-            'uuid_record %s start %s',
-            $callUuid,
-            $absolutePath,
+        $command = $this->buildRecordingCommand(
+            action: 'start',
+            callUuid: $callUuid,
+            absolutePath: $absolutePath,
+            profile: $profile,
         );
 
         $response = $this->client->api($command);
@@ -44,17 +48,51 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
         $this->assertSuccessfulResponse($command, $response);
     }
 
-    public function stopRecording(string $callUuid, string $absolutePath): void
+    public function stopRecording(string $callUuid, string $absolutePath, CallRecordingProfile $profile): void
     {
-        $command = sprintf(
-            'uuid_record %s stop %s',
-            $callUuid,
-            $absolutePath,
+        $command = $this->buildRecordingCommand(
+            action: 'stop',
+            callUuid: $callUuid,
+            absolutePath: $absolutePath,
+            profile: $profile,
         );
 
         $response = $this->client->api($command);
 
         $this->assertSuccessfulResponse($command, $response);
+    }
+
+    private function buildRecordingCommand(
+        string $action,
+        string $callUuid,
+        string $absolutePath,
+        CallRecordingProfile $profile,
+    ): string {
+        if ($profile->mediaType === CallRecordingMediaType::Audio) {
+            return sprintf(
+                'uuid_record %s %s %s',
+                $callUuid,
+                $action,
+                $absolutePath,
+            );
+        }
+
+        $template = config(sprintf('telephony.webrtc.recording.direct_video_%s_command_template', $action));
+
+        if (! is_string($template) || trim($template) === '') {
+            throw new RuntimeException(sprintf(
+                'Direct video recording %s command template is not configured.',
+                $action,
+            ));
+        }
+
+        return strtr($template, [
+            '{call_uuid}' => $callUuid,
+            '{absolute_output_path}' => $absolutePath,
+            '{absolute_path}' => $absolutePath,
+            '{media_type}' => $profile->mediaType->value,
+            '{container}' => $profile->container,
+        ]);
     }
 
     private function assertSuccessfulResponse(string $command, string $response): void

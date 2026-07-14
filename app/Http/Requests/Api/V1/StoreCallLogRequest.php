@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Enums\CallMediaType;
+use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Models\Extension;
 use App\Models\Organization;
@@ -37,6 +39,8 @@ class StoreCallLogRequest extends FormRequest
             'callee_number' => ['required', 'string', 'max:50'],
             'freeswitch_uuid' => ['sometimes', 'nullable', 'string', 'max:64'],
             'status' => ['sometimes', Rule::enum(CallStatus::class)],
+            'media_type' => ['sometimes', Rule::enum(CallMediaType::class)],
+            'session_type' => ['sometimes', Rule::enum(CallSessionType::class)],
             'duration' => ['sometimes', 'integer', 'min:0'],
             'recording_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'recording_duration' => ['sometimes', 'nullable', 'integer', 'min:0'],

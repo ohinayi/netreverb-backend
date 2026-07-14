@@ -4,6 +4,7 @@ namespace App\Services\Recordings;
 
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Data\CallRecordingLocation;
+use App\Data\CallRecordingProfile;
 use App\Models\CallLog;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Storage;
@@ -14,14 +15,16 @@ class LocalCallRecordingStorage implements CallRecordingStorage
     public function buildLocation(
         CallLog $callLog,
         string $callUuid,
+        CallRecordingProfile $profile,
         CarbonInterface $recordedAt,
     ): CallRecordingLocation {
         $directory = $recordedAt->format('Y/m/d');
         $fileName = sprintf(
-            '%s_%s_%s.wav',
+            '%s_%s_%s.%s',
             $callLog->public_id,
             $recordedAt->format('Ymd_His'),
             Str::of($callUuid)->replace('/', '-')->replace('\\', '-')->toString(),
+            $profile->container,
         );
         $relativePath = $directory.'/'.$fileName;
 

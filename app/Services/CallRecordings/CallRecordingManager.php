@@ -4,7 +4,10 @@ namespace App\Services\CallRecordings;
 
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Data\CallRecordingProfile;
+use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Exceptions\FreeSwitchRecordingException;
 use App\Jobs\SyncCallRecordingFromVps;
@@ -61,6 +64,7 @@ class CallRecordingManager
         }
 
         try {
+            $profile = $this->recordingProfileFor($callLog);
             $absolutePath = $this->storage->absolutePath($callLog);
             $this->storage->ensureDirectoryExists($callLog->recording_file_path ?? '');
             $this->announceRecordingStart($callLog, $callUuid);
@@ -71,9 +75,11 @@ class CallRecordingManager
                 'recording_id' => $callLog->recording_id,
                 'recording_uuid' => $callUuid,
                 'recording_path' => $absolutePath,
+                'recording_media_type' => $profile->mediaType->value,
+                'recording_container' => $profile->container,
             ]);
 
-            $this->gateway->startRecording($callUuid, $absolutePath);
+            $this->gateway->startRecording($callUuid, $absolutePath, $profile);
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Recording,
             ])->save();
@@ -159,6 +165,7 @@ class CallRecordingManager
         $absolutePath = $this->storage->absolutePath($callLog);
         $startedAt = $callLog->recording_started_at ?? $callLog->created_at ?? now();
         $endedAt = now();
+        $profile = $this->recordingProfileFor($callLog);
 
         try {
             Log::info('Stopping FreeSWITCH call recording.', [
@@ -167,9 +174,11 @@ class CallRecordingManager
                 'recording_id' => $callLog->recording_id,
                 'recording_uuid' => $callLog->recording_uuid,
                 'recording_path' => $absolutePath,
+                'recording_media_type' => $profile->mediaType->value,
+                'recording_container' => $profile->container,
             ]);
 
-            $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath);
+            $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath, $profile);
             $this->finalizeStoppedRecording($callLog, $startedAt, $endedAt);
         } catch (FreeSwitchRecordingException $exception) {
             if ($this->sessionAlreadyEnded($exception)) {
@@ -367,11 +376,14 @@ class CallRecordingManager
 
     private function prepareLockedCallLog(CallLog $callLog, string $callUuid, Carbon $recordedAt): CallLog
     {
-        $location = $this->storage->buildLocation($callLog, $callUuid, $recordedAt);
+        $profile = $this->recordingProfileFor($callLog);
+        $location = $this->storage->buildLocation($callLog, $callUuid, $profile, $recordedAt);
 
         $callLog->forceFill([
             'recording_id' => $callLog->recording_id ?: (string) Str::ulid(),
             'recording_uuid' => $callUuid,
+            'recording_media_type' => $profile->mediaType,
+            'recording_container' => $profile->container,
             'recording_file_path' => $location->relativePath,
             'recording_file_name' => $location->fileName,
             'recording_url' => route('organizations.call-logs.recording.show', [
@@ -391,6 +403,47 @@ class CallRecordingManager
         ]);
 
         return $callLog;
+    }
+
+    private function recordingProfileFor(CallLog $callLog): CallRecordingProfile
+    {
+        if ($callLog->session_type === CallSessionType::Conference) {
+            return new CallRecordingProfile(
+                sessionType: CallSessionType::Conference,
+                mediaType: CallRecordingMediaType::Audio,
+                container: (string) config('telephony.webrtc.recording.conference_audio_container', 'wav'),
+            );
+        }
+
+        if ((string) ($callLog->media_type?->value ?? $callLog->media_type) === 'video'
+            && $this->supportsDirectVideoRecording()) {
+            return new CallRecordingProfile(
+                sessionType: CallSessionType::Direct,
+                mediaType: CallRecordingMediaType::Video,
+                container: (string) config('telephony.webrtc.recording.direct_video_container', 'mp4'),
+            );
+        }
+
+        return new CallRecordingProfile(
+            sessionType: CallSessionType::Direct,
+            mediaType: CallRecordingMediaType::Audio,
+            container: (string) config('telephony.webrtc.recording.direct_audio_container', 'wav'),
+        );
+    }
+
+    private function supportsDirectVideoRecording(): bool
+    {
+        if (! (bool) config('telephony.webrtc.recording.direct_video_enabled', false)) {
+            return false;
+        }
+
+        $startTemplate = config('telephony.webrtc.recording.direct_video_start_command_template');
+        $stopTemplate = config('telephony.webrtc.recording.direct_video_stop_command_template');
+
+        return is_string($startTemplate)
+            && trim($startTemplate) !== ''
+            && is_string($stopTemplate)
+            && trim($stopTemplate) !== '';
     }
 
     private function hasPreparedRecordingMetadata(CallLog $callLog, string $callUuid): bool

@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\CallMediaType;
+use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use Database\Factories\CallLogFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -19,11 +22,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'caller_number',
     'callee_number',
     'status',
+    'media_type',
+    'session_type',
     'duration',
     'freeswitch_uuid',
     'recording_url',
     'recording_id',
     'recording_uuid',
+    'recording_media_type',
+    'recording_container',
     'recording_file_path',
     'recording_file_name',
     'recording_duration',
@@ -41,6 +48,8 @@ class CallLog extends Model
 
     protected $attributes = [
         'status' => CallStatus::Ringing->value,
+        'media_type' => CallMediaType::Audio->value,
+        'session_type' => CallSessionType::Direct->value,
         'duration' => 0,
     ];
 
@@ -73,8 +82,11 @@ class CallLog extends Model
     {
         return [
             'status' => CallStatus::class,
+            'media_type' => CallMediaType::class,
+            'session_type' => CallSessionType::class,
             'duration' => 'integer',
             'recording_status' => CallRecordingStatus::class,
+            'recording_media_type' => CallRecordingMediaType::class,
             'recording_duration' => 'integer',
             'recording_size' => 'integer',
             'recording_started_at' => 'datetime',

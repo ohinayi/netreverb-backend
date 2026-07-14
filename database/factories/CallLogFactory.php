@@ -2,6 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Enums\CallMediaType;
+use App\Enums\CallRecordingMediaType;
+use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Models\CallLog;
 use App\Models\Organization;
@@ -29,11 +32,15 @@ class CallLogFactory extends Factory
             'caller_number' => fake()->e164PhoneNumber(),
             'callee_number' => fake()->e164PhoneNumber(),
             'status' => CallStatus::Completed,
+            'media_type' => CallMediaType::Audio,
+            'session_type' => CallSessionType::Direct,
             'duration' => $duration,
             'freeswitch_uuid' => null,
             'recording_url' => null,
             'recording_id' => null,
             'recording_uuid' => null,
+            'recording_media_type' => null,
+            'recording_container' => null,
             'recording_file_path' => null,
             'recording_file_name' => null,
             'recording_duration' => null,
@@ -53,6 +60,8 @@ class CallLogFactory extends Factory
     {
         return $this->state(fn (array $attributes): array => [
             'recording_url' => 'https://storage.netreverb.com/recordings/'.fake()->uuid().'.mp3',
+            'recording_media_type' => CallRecordingMediaType::Audio,
+            'recording_container' => 'mp3',
             'recording_duration' => $attributes['duration'],
             'recording_size' => fake()->numberBetween(100000, 5000000),
         ]);
