@@ -18,6 +18,10 @@ class ConferenceRoomParticipantResource extends JsonResource
             'email' => $this->email,
             'role' => $this->role,
             'status' => $this->status?->value ?? $this->status,
+            'moderation' => [
+                'audio_muted_by_host' => (bool) data_get($this->metadata, 'moderation.audio_muted_by_host', false),
+                'video_muted_by_host' => (bool) data_get($this->metadata, 'moderation.video_muted_by_host', false),
+            ],
             'invited_at' => $this->invited_at,
             'joined_at' => $this->joined_at,
             'left_at' => $this->left_at,

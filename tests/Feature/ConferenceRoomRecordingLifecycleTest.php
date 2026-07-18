@@ -89,6 +89,8 @@ class ConferenceRoomRecordingLifecycleTest extends TestCase
             ->andReturnUsing(function (string $conferenceName, string $absolutePath) use (&$startedConferenceName): void {
                 $startedConferenceName = $conferenceName;
             });
+        $gateway->shouldReceive('listMembers')->once()->andReturn([]);
+        $gateway->shouldReceive('kickMember')->never();
 
         $gateway->shouldReceive('stopRecording')
             ->once()

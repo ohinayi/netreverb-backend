@@ -21,6 +21,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class CallLogController extends Controller
 {
@@ -136,23 +137,42 @@ class CallLogController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Organization $organization, CallLog $callLog): CallLogResource
+    public function show(Request $request, Organization $organization, CallLog $callLog): CallLogResource
     {
         Gate::authorize('view', $callLog);
 
+        $telephonyStatus = [
+            'status' => 'ok',
+            'reason' => null,
+        ];
+
         if ($callLog->freeswitch_uuid === null
             && in_array($callLog->status, [CallStatus::Ringing, CallStatus::InProgress], true)) {
-            $matchedCount = $this->uuidSynchronizer->syncOnce();
+            try {
+                $matchedCount = $this->uuidSynchronizer->syncOnce();
 
-            Log::info('Call log show triggered FreeSWITCH UUID sync.', [
-                'call_log_id' => $callLog->public_id,
-                'matched_count' => $matchedCount,
-            ]);
+                Log::info('Call log show triggered FreeSWITCH UUID sync.', [
+                    'call_log_id' => $callLog->public_id,
+                    'matched_count' => $matchedCount,
+                ]);
 
-            $callLog->refresh();
+                $callLog->refresh();
+            } catch (Throwable $exception) {
+                $telephonyStatus = [
+                    'status' => 'degraded',
+                    'reason' => 'event_socket_unavailable',
+                ];
+
+                Log::warning('Call log show could not refresh live FreeSWITCH UUID data. Returning persisted call-log data instead.', [
+                    'call_log_id' => $callLog->public_id,
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+            }
         }
 
         $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
+        $request->attributes->set('telephony_status', $telephonyStatus);
 
         return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
     }

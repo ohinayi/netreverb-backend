@@ -3,7 +3,6 @@
 namespace App\Actions\ConferenceRooms;
 
 use App\Enums\ConferenceParticipantStatus;
-use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
@@ -14,7 +13,10 @@ use Illuminate\Validation\ValidationException;
 
 class JoinConferenceRoom
 {
-    public function __construct(private ConferenceRecordingManager $recordingManager) {}
+    public function __construct(
+        private ConferenceRecordingManager $recordingManager,
+        private TouchConferenceRoomExpiry $touchConferenceRoomExpiry,
+    ) {}
 
     /**
      * @param array{
@@ -30,11 +32,8 @@ class JoinConferenceRoom
                 ->lockForUpdate()
                 ->findOrFail($conferenceRoom->id);
 
-            if ($conferenceRoom->status !== ConferenceRoomStatus::Active) {
-                throw ValidationException::withMessages([
-                    'conference_room' => 'This meeting is not available for joining.',
-                ]);
-            }
+            $conferenceRoom = $this->touchConferenceRoomExpiry->execute($conferenceRoom);
+            $this->ensureRoomCanBeJoined($conferenceRoom);
 
             if ($conferenceRoom->passcode_hash !== null
                 && ! Hash::check($attributes['passcode'] ?? '', $conferenceRoom->passcode_hash)) {
@@ -66,5 +65,20 @@ class JoinConferenceRoom
         $this->recordingManager->start($conferenceRoom);
 
         return $participant;
+    }
+
+    private function ensureRoomCanBeJoined(ConferenceRoom $conferenceRoom): void
+    {
+        if ($conferenceRoom->status->value === 'expired') {
+            throw ValidationException::withMessages([
+                'conference_room' => 'This meeting invite has expired.',
+            ]);
+        }
+
+        if ($conferenceRoom->status->value !== 'active') {
+            throw ValidationException::withMessages([
+                'conference_room' => 'This meeting has ended.',
+            ]);
+        }
     }
 }

@@ -18,6 +18,7 @@ class CreateConferenceRoom
 {
     public function __construct(
         private AllocateConferenceRoomNumber $allocateConferenceRoomNumber,
+        private GenerateConferenceRoomInviteCode $generateConferenceRoomInviteCode,
         private ConferenceRecordingManager $recordingManager,
     ) {}
 
@@ -36,6 +37,7 @@ class CreateConferenceRoom
                 'organization_id' => $organization->id,
                 'host_user_id' => $host->id,
                 'room_id' => (string) Str::ulid(),
+                'invite_code' => $this->generateConferenceRoomInviteCode->execute(),
                 'sip_number' => $this->allocateConferenceRoomNumber->execute(),
                 'title' => $attributes['title'],
                 'status' => ConferenceRoomStatus::Active,
@@ -44,7 +46,7 @@ class CreateConferenceRoom
                     : null,
                 'expires_at' => $attributes['expires_at']
                     ?? now()->addMinutes(config('telephony.conference_default_duration_minutes')),
-                'configuration' => $attributes['configuration'] ?? null,
+                'configuration' => $this->normalizeConfiguration($attributes['configuration'] ?? null),
             ]);
 
             ConferenceRoomParticipant::query()->create([
@@ -62,11 +64,23 @@ class CreateConferenceRoom
                 ],
             ]);
 
-            return $conferenceRoom->load(['hostUser', 'participants.user']);
+            return $conferenceRoom->load(['organization', 'hostUser', 'participants.user']);
         }, attempts: 3);
 
         $this->recordingManager->start($conferenceRoom);
 
         return $conferenceRoom;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $configuration
+     * @return array<string, mixed>
+     */
+    private function normalizeConfiguration(?array $configuration): array
+    {
+        $configuration ??= [];
+        $configuration['is_open'] = (bool) ($configuration['is_open'] ?? false);
+
+        return $configuration;
     }
 }

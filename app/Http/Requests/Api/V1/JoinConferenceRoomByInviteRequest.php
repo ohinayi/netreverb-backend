@@ -2,11 +2,10 @@
 
 namespace App\Http\Requests\Api\V1;
 
-use App\Models\ConferenceRoom;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-class JoinConferenceRoomRequest extends FormRequest
+class JoinConferenceRoomByInviteRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -21,21 +20,6 @@ class JoinConferenceRoomRequest extends FormRequest
             'display_name' => ['sometimes', 'nullable', 'string', 'min:2', 'max:120'],
             'passcode' => ['sometimes', 'nullable', 'string', 'max:20'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ];
-    }
-
-    public function after(): array
-    {
-        return [
-            function ($validator): void {
-                if (! $this->route('conferenceRoom') instanceof ConferenceRoom) {
-                    return;
-                }
-
-                if ($this->string('invite_code')->toString() !== $this->route('conferenceRoom')->invite_code) {
-                    $validator->errors()->add('invite_code', 'The meeting invite code is invalid.');
-                }
-            },
         ];
     }
 }

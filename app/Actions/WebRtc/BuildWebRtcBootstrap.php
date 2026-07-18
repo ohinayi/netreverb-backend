@@ -24,6 +24,9 @@ class BuildWebRtcBootstrap
         $turnCredential = base64_encode(hash_hmac('sha1', $turnUsername, $turnSecret, true));
 
         $supportsDirectVideoRecording = $this->supportsDirectVideoRecording();
+        $directVideoStrategy = (string) config('telephony.webrtc.recording.direct_video_strategy', 'freeswitch');
+        $supportsConferenceVideoRecording = $this->supportsConferenceVideoRecording();
+        $conferenceVideoStrategy = (string) config('telephony.webrtc.recording.conference_video_strategy', 'client_chunks');
 
         return [
             'wss' => config('telephony.secure_websocket_url'),
@@ -90,13 +93,19 @@ class BuildWebRtcBootstrap
                     'direct_audio' => (bool) config('telephony.webrtc.recording.direct_audio_enabled', true),
                     'direct_video' => $supportsDirectVideoRecording,
                     'conference' => (bool) config('telephony.webrtc.recording.conference_audio_enabled', true),
+                    'direct_video_strategy' => $directVideoStrategy,
                     'direct_audio_container' => (string) config('telephony.webrtc.recording.direct_audio_container', 'wav'),
                     'direct_video_container' => (string) config('telephony.webrtc.recording.direct_video_container', 'mp4'),
+                    'direct_video_chunk_duration_ms' => (int) config('telephony.webrtc.recording.direct_video_chunk_duration_ms', 4000),
+                    'direct_video_max_chunk_size_kb' => (int) config('telephony.webrtc.recording.direct_video_max_chunk_size_kb', 8192),
                     'conference_audio' => (bool) config('telephony.webrtc.recording.conference_audio_enabled', true),
-                    'conference_video' => (bool) config('telephony.webrtc.recording.conference_video_enabled', false),
+                    'conference_video' => $supportsConferenceVideoRecording,
+                    'conference_video_strategy' => $conferenceVideoStrategy,
                     'conference_screen_share' => (bool) config('telephony.webrtc.recording.conference_screen_share_enabled', false),
                     'conference_audio_container' => (string) config('telephony.webrtc.recording.conference_audio_container', 'wav'),
                     'conference_video_container' => (string) config('telephony.webrtc.recording.conference_video_container', 'mp4'),
+                    'conference_video_chunk_duration_ms' => (int) config('telephony.webrtc.recording.conference_video_chunk_duration_ms', 4000),
+                    'conference_video_max_chunk_size_kb' => (int) config('telephony.webrtc.recording.conference_video_max_chunk_size_kb', 8192),
                 ],
             ],
             'expires_at' => $expiresAt,
@@ -105,8 +114,16 @@ class BuildWebRtcBootstrap
 
     private function supportsDirectVideoRecording(): bool
     {
+        if (! (bool) config('telephony.webrtc.video_enabled', true)) {
+            return false;
+        }
+
         if (! (bool) config('telephony.webrtc.recording.direct_video_enabled', false)) {
             return false;
+        }
+
+        if ((string) config('telephony.webrtc.recording.direct_video_strategy', 'freeswitch') === 'client_chunks') {
+            return true;
         }
 
         $startTemplate = config('telephony.webrtc.recording.direct_video_start_command_template');
@@ -116,5 +133,14 @@ class BuildWebRtcBootstrap
             && trim($startTemplate) !== ''
             && is_string($stopTemplate)
             && trim($stopTemplate) !== '';
+    }
+
+    private function supportsConferenceVideoRecording(): bool
+    {
+        if (! (bool) config('telephony.webrtc.recording.conference_video_enabled', false)) {
+            return false;
+        }
+
+        return (string) config('telephony.webrtc.recording.conference_video_strategy', 'client_chunks') === 'client_chunks';
     }
 }

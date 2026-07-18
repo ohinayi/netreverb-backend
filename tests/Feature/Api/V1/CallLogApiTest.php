@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class CallLogApiTest extends TestCase
@@ -235,6 +236,36 @@ class CallLogApiTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.freeswitch_uuid', 'fs-live-sync-uuid');
+    }
+
+    public function test_show_returns_persisted_call_log_data_when_live_uuid_sync_is_temporarily_unavailable(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::Ringing->value,
+            'freeswitch_uuid' => null,
+        ]);
+
+        $this->app->instance(
+            FreeSwitchCallUuidSynchronizer::class,
+            tap($this->mock(FreeSwitchCallUuidSynchronizer::class), function ($mock): void {
+                $mock->shouldReceive('syncOnce')
+                    ->once()
+                    ->andThrow(new RuntimeException(
+                        'Unable to connect to the FreeSWITCH event socket at 127.0.0.1:8021 (Connection refused).',
+                    ));
+            }),
+        );
+
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}");
+
+        $response->assertOk()
+            ->assertJsonPath('data.id', $callLog->public_id)
+            ->assertJsonPath('data.freeswitch_uuid', null)
+            ->assertJsonPath('data.telephony.status', 'degraded')
+            ->assertJsonPath('data.telephony.reason', 'event_socket_unavailable');
     }
 
     public function test_index_does_not_trigger_uuid_sync_for_active_calls_without_uuid(): void

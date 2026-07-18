@@ -4,6 +4,7 @@ namespace App\Http\Resources\Api\V1;
 
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
+use App\Models\CallRecordingUpload;
 use App\Models\Organization;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -27,6 +28,11 @@ class CallLogResource extends JsonResource
         $playbackAvailable = $this->recordingPlaybackAvailable($recordingStatus, $recordingUrl, $recordingFilePath);
         $callPerspective = $this->callPerspective($request);
         $hasVisibleRecording = $recordingStatus !== null;
+        $recordingUpload = $this->whenLoaded('recordingUpload');
+        $telephonyStatus = $request->attributes->get('telephony_status', [
+            'status' => 'ok',
+            'reason' => null,
+        ]);
 
         return [
             'id' => $this->public_id,
@@ -50,11 +56,31 @@ class CallLogResource extends JsonResource
                 'container' => $attributes['recording_container'] ?? null,
                 'file_name' => $attributes['recording_file_name'] ?? null,
                 'playback_available' => $playbackAvailable,
+                'upload' => $recordingUpload instanceof CallRecordingUpload
+                    ? [
+                        'strategy' => 'client_chunks',
+                        'status' => $recordingUpload->status,
+                        'session_id' => $recordingUpload->public_id,
+                        'next_sequence' => $recordingUpload->next_sequence,
+                        'chunk_upload_url' => route('organizations.call-logs.recording.upload-chunk', [
+                            'organization' => $this->organizationPublicId(),
+                            'callLog' => $this->public_id,
+                        ]),
+                        'finalize_url' => route('organizations.call-logs.recording.finalize-upload', [
+                            'organization' => $this->organizationPublicId(),
+                            'callLog' => $this->public_id,
+                        ]),
+                    ]
+                    : null,
             ] : null,
             'started_at' => $this->started_at,
             'ended_at' => $this->ended_at,
             'caller_extension' => ExtensionResource::make($this->whenLoaded('callerExtension')),
             'callee_extension' => ExtensionResource::make($this->whenLoaded('calleeExtension')),
+            'telephony' => [
+                'status' => $telephonyStatus['status'] ?? 'ok',
+                'reason' => $telephonyStatus['reason'] ?? null,
+            ],
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
@@ -62,17 +88,7 @@ class CallLogResource extends JsonResource
 
     private function recordingUrlFor(Request $request): ?string
     {
-        $organization = $request->route('organization');
-
-        if ($organization instanceof Organization) {
-            return route('organizations.call-logs.recording.show', [
-                'organization' => $organization->public_id,
-                'callLog' => $this->public_id,
-            ]);
-        }
-
-        $organizationPublicId = $this->organization?->public_id
-            ?? Organization::query()->whereKey($this->organization_id)->value('public_id');
+        $organizationPublicId = $this->organizationPublicId($request);
 
         if ($organizationPublicId === null) {
             return null;
@@ -82,6 +98,18 @@ class CallLogResource extends JsonResource
             'organization' => $organizationPublicId,
             'callLog' => $this->public_id,
         ]);
+    }
+
+    private function organizationPublicId(?Request $request = null): ?string
+    {
+        $organization = $request?->route('organization');
+
+        if ($organization instanceof Organization) {
+            return $organization->public_id;
+        }
+
+        return $this->organization?->public_id
+            ?? Organization::query()->whereKey($this->organization_id)->value('public_id');
     }
 
     private function recordingPlaybackAvailable(

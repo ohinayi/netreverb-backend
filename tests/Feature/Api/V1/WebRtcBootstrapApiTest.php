@@ -33,15 +33,21 @@ class WebRtcBootstrapApiTest extends TestCase
             'telephony.webrtc.video_max_bitrate_kbps' => 1800,
             'telephony.webrtc.recording.direct_audio_enabled' => true,
             'telephony.webrtc.recording.direct_video_enabled' => false,
+            'telephony.webrtc.recording.direct_video_strategy' => 'freeswitch',
             'telephony.webrtc.recording.direct_audio_container' => 'wav',
             'telephony.webrtc.recording.direct_video_container' => 'mp4',
             'telephony.webrtc.recording.direct_video_start_command_template' => 'api start-video {call_uuid} {absolute_output_path} {container}',
             'telephony.webrtc.recording.direct_video_stop_command_template' => 'api stop-video {call_uuid} {absolute_output_path} {container}',
+            'telephony.webrtc.recording.direct_video_chunk_duration_ms' => 4000,
+            'telephony.webrtc.recording.direct_video_max_chunk_size_kb' => 8192,
             'telephony.webrtc.recording.conference_audio_enabled' => true,
             'telephony.webrtc.recording.conference_video_enabled' => false,
+            'telephony.webrtc.recording.conference_video_strategy' => 'client_chunks',
             'telephony.webrtc.recording.conference_screen_share_enabled' => false,
             'telephony.webrtc.recording.conference_audio_container' => 'wav',
             'telephony.webrtc.recording.conference_video_container' => 'mp4',
+            'telephony.webrtc.recording.conference_video_chunk_duration_ms' => 4000,
+            'telephony.webrtc.recording.conference_video_max_chunk_size_kb' => 8192,
             'telephony.webrtc.video.width.ideal' => 1280,
             'telephony.webrtc.video.width.max' => 1920,
             'telephony.webrtc.video.height.ideal' => 720,
@@ -130,13 +136,19 @@ class WebRtcBootstrapApiTest extends TestCase
                         'direct_audio' => true,
                         'direct_video' => false,
                         'conference' => true,
+                        'direct_video_strategy' => 'freeswitch',
                         'direct_audio_container' => 'wav',
                         'direct_video_container' => 'mp4',
+                        'direct_video_chunk_duration_ms' => 4000,
+                        'direct_video_max_chunk_size_kb' => 8192,
                         'conference_audio' => true,
                         'conference_video' => false,
+                        'conference_video_strategy' => 'client_chunks',
                         'conference_screen_share' => false,
                         'conference_audio_container' => 'wav',
                         'conference_video_container' => 'mp4',
+                        'conference_video_chunk_duration_ms' => 4000,
+                        'conference_video_max_chunk_size_kb' => 8192,
                     ],
                 ],
                 'expires_at' => $expiresAt,
@@ -165,6 +177,7 @@ class WebRtcBootstrapApiTest extends TestCase
         config()->set([
             'telephony.turn.secret' => 'test-turn-shared-secret',
             'telephony.webrtc.recording.direct_video_enabled' => true,
+            'telephony.webrtc.recording.direct_video_strategy' => 'freeswitch',
             'telephony.webrtc.recording.direct_video_start_command_template' => null,
             'telephony.webrtc.recording.direct_video_stop_command_template' => null,
         ]);
@@ -183,6 +196,48 @@ class WebRtcBootstrapApiTest extends TestCase
         $this->getJson('/api/v1/webrtc/bootstrap')
             ->assertOk()
             ->assertJsonPath('calling.recording.direct_video', true);
+    }
+
+    public function test_bootstrap_enables_direct_video_recording_for_client_chunk_strategy_without_voip_templates(): void
+    {
+        config()->set([
+            'telephony.turn.secret' => 'test-turn-shared-secret',
+            'telephony.webrtc.recording.direct_video_enabled' => true,
+            'telephony.webrtc.recording.direct_video_strategy' => 'client_chunks',
+            'telephony.webrtc.recording.direct_video_container' => 'webm',
+            'telephony.webrtc.recording.direct_video_start_command_template' => null,
+            'telephony.webrtc.recording.direct_video_stop_command_template' => null,
+        ]);
+        [$user] = $this->assignedExtension();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/webrtc/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('calling.recording.direct_video', true)
+            ->assertJsonPath('calling.recording.direct_video_strategy', 'client_chunks')
+            ->assertJsonPath('calling.recording.direct_video_container', 'webm');
+    }
+
+    public function test_bootstrap_exposes_conference_video_client_chunk_capabilities(): void
+    {
+        config()->set([
+            'telephony.turn.secret' => 'test-turn-shared-secret',
+            'telephony.webrtc.recording.conference_video_enabled' => true,
+            'telephony.webrtc.recording.conference_video_strategy' => 'client_chunks',
+            'telephony.webrtc.recording.conference_video_container' => 'webm',
+            'telephony.webrtc.recording.conference_video_chunk_duration_ms' => 2500,
+            'telephony.webrtc.recording.conference_video_max_chunk_size_kb' => 4096,
+        ]);
+        [$user] = $this->assignedExtension();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/webrtc/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('calling.recording.conference_video', true)
+            ->assertJsonPath('calling.recording.conference_video_strategy', 'client_chunks')
+            ->assertJsonPath('calling.recording.conference_video_container', 'webm')
+            ->assertJsonPath('calling.recording.conference_video_chunk_duration_ms', 2500)
+            ->assertJsonPath('calling.recording.conference_video_max_chunk_size_kb', 4096);
     }
 
     public function test_user_must_select_an_extension_when_multiple_are_assigned(): void

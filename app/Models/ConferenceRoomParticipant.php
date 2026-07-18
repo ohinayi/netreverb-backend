@@ -36,6 +36,11 @@ class ConferenceRoomParticipant extends Model
         return ['public_id'];
     }
 
+    public function getRouteKeyName(): string
+    {
+        return 'public_id';
+    }
+
     public function conferenceRoom(): BelongsTo
     {
         return $this->belongsTo(ConferenceRoom::class);

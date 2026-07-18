@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'organization_id',
     'host_user_id',
     'room_id',
+    'invite_code',
     'sip_number',
     'title',
     'status',
@@ -73,6 +74,11 @@ class ConferenceRoom extends Model
     public function conferenceRecordings(): HasMany
     {
         return $this->recordings();
+    }
+
+    public function isOpen(): bool
+    {
+        return (bool) data_get($this->configuration, 'is_open', false);
     }
 
     protected function casts(): array

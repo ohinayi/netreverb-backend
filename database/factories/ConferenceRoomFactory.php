@@ -25,6 +25,7 @@ class ConferenceRoomFactory extends Factory
             'organization_id' => Organization::factory(),
             'host_user_id' => User::factory(),
             'room_id' => (string) Str::ulid(),
+            'invite_code' => Str::random(22),
             'sip_number' => fake()->numerify('45####'),
             'title' => fake()->sentence(3),
             'status' => ConferenceRoomStatus::Active,
@@ -32,7 +33,9 @@ class ConferenceRoomFactory extends Factory
             'expires_at' => now()->addMinutes(120),
             'ended_at' => null,
             'ended_by_user_id' => null,
-            'configuration' => null,
+            'configuration' => [
+                'is_open' => false,
+            ],
         ];
     }
 }

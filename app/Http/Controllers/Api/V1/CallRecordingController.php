@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\CallRecordingStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\FinalizeCallRecordingUploadRequest;
 use App\Http\Requests\Api\V1\StartCallRecordingRequest;
+use App\Http\Requests\Api\V1\UploadCallRecordingChunkRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Organization;
 use App\Services\CallRecordings\CallRecordingManager;
+use App\Services\CallRecordings\DirectVideoRecordingUploadManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
@@ -19,6 +22,7 @@ class CallRecordingController extends Controller
 {
     public function __construct(
         private readonly CallRecordingManager $recordingManager,
+        private readonly DirectVideoRecordingUploadManager $uploadManager,
     ) {}
 
     public function start(
@@ -38,6 +42,15 @@ class CallRecordingController extends Controller
             $callUuid = (string) ($callLog->freeswitch_uuid ?? '');
         }
 
+        $requestedMode = $request->string('recording_mode')->toString() ?: null;
+        $requestedContainer = $request->string('recording_container')->toString() ?: null;
+        $requestedMimeType = $request->string('recording_mime_type')->toString() ?: null;
+        $profile = $this->recordingManager->requestedProfileFor(
+            $callLog,
+            $requestedMode,
+            $requestedContainer,
+        );
+
         if ($callUuid === '') {
             throw ValidationException::withMessages([
                 'recording_uuid' => 'A FreeSWITCH UUID is required before recording can start.',
@@ -47,9 +60,22 @@ class CallRecordingController extends Controller
         $this->recordingManager->start(
             $callLog,
             $callUuid,
+            $profile,
         );
 
-        return CallLogResource::make($callLog->fresh(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+        if ($this->recordingManager->usesClientVideoUploadProfile($profile)) {
+            $this->uploadManager->createOrRefreshSession(
+                $callLog->fresh(),
+                $profile->container,
+                $requestedMimeType,
+            );
+        }
+
+        return CallLogResource::make($callLog->fresh([
+            'callerExtension.dialableNumber',
+            'calleeExtension.dialableNumber',
+            'recordingUpload',
+        ]));
     }
 
     public function stop(
@@ -60,7 +86,50 @@ class CallRecordingController extends Controller
 
         $this->recordingManager->stop($callLog);
 
-        return CallLogResource::make($callLog->fresh(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+        return CallLogResource::make($callLog->fresh([
+            'callerExtension.dialableNumber',
+            'calleeExtension.dialableNumber',
+            'recordingUpload',
+        ]));
+    }
+
+    public function uploadChunk(
+        UploadCallRecordingChunkRequest $request,
+        Organization $organization,
+        CallLog $callLog,
+    ): CallLogResource {
+        Gate::authorize('update', $callLog);
+
+        $this->uploadManager->appendChunk(
+            $callLog,
+            (int) $request->integer('sequence'),
+            $request->file('chunk'),
+        );
+
+        return CallLogResource::make($callLog->fresh([
+            'callerExtension.dialableNumber',
+            'calleeExtension.dialableNumber',
+            'recordingUpload',
+        ]));
+    }
+
+    public function finalizeUpload(
+        FinalizeCallRecordingUploadRequest $request,
+        Organization $organization,
+        CallLog $callLog,
+    ): CallLogResource {
+        Gate::authorize('update', $callLog);
+
+        $this->uploadManager->finalize(
+            $callLog,
+            $request->date('ended_at'),
+        );
+
+        return CallLogResource::make($callLog->fresh([
+            'callerExtension.dialableNumber',
+            'calleeExtension.dialableNumber',
+            'recordingUpload',
+        ]));
     }
 
     public function show(

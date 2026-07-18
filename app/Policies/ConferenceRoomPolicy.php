@@ -40,6 +40,25 @@ class ConferenceRoomPolicy
             && $this->activeMembership($user, $conferenceRoom->organization_id) !== null;
     }
 
+    public function resolveInvite(User $user, ConferenceRoom $conferenceRoom): bool
+    {
+        return $conferenceRoom->status === ConferenceRoomStatus::Active;
+    }
+
+    public function viewWaitingRoom(User $user, ConferenceRoom $conferenceRoom): bool
+    {
+        return $conferenceRoom->status === ConferenceRoomStatus::Active
+            && (
+                $conferenceRoom->host_user_id === $user->id
+                || $this->canManage($user, $conferenceRoom->organization_id)
+            );
+    }
+
+    public function moderateParticipant(User $user, ConferenceRoom $conferenceRoom): bool
+    {
+        return $this->viewWaitingRoom($user, $conferenceRoom);
+    }
+
     public function leave(User $user, ConferenceRoom $conferenceRoom): bool
     {
         return $conferenceRoom->status === ConferenceRoomStatus::Active

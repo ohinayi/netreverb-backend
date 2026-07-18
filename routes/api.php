@@ -46,6 +46,10 @@ Route::prefix('v1')->group(function (): void {
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');
+            Route::get('conference-rooms/resolve', [ConferenceRoomController::class, 'resolve'])
+                ->name('conference-rooms.resolve');
+            Route::post('conference-rooms/join-by-invite', [ConferenceRoomController::class, 'joinByInvite'])
+                ->name('conference-rooms.join-by-invite');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
             Route::get('people/search', [FriendshipController::class, 'search']);
@@ -77,6 +81,14 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/call-logs/{callLog}/recording/stop',
                     [CallRecordingController::class, 'stop'],
                 )->name('organizations.call-logs.recording.stop');
+                Route::post(
+                    'organizations/{organization}/call-logs/{callLog}/recording/chunks',
+                    [CallRecordingController::class, 'uploadChunk'],
+                )->name('organizations.call-logs.recording.upload-chunk');
+                Route::post(
+                    'organizations/{organization}/call-logs/{callLog}/recording/finalize',
+                    [CallRecordingController::class, 'finalizeUpload'],
+                )->name('organizations.call-logs.recording.finalize-upload');
                 Route::get(
                     'organizations/{organization}/call-logs/{callLog}/recording',
                     [CallRecordingController::class, 'show'],
@@ -96,6 +108,38 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/invite',
                     [ConferenceRoomController::class, 'invite'],
                 )->name('organizations.conference-rooms.invite');
+                Route::get(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/waiting-participants',
+                    [ConferenceRoomController::class, 'waitingParticipants'],
+                )->name('organizations.conference-rooms.waiting-participants');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/admit',
+                    [ConferenceRoomController::class, 'admitParticipant'],
+                )->name('organizations.conference-rooms.participants.admit');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/deny',
+                    [ConferenceRoomController::class, 'denyParticipant'],
+                )->name('organizations.conference-rooms.participants.deny');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/remove',
+                    [ConferenceRoomController::class, 'removeParticipant'],
+                )->name('organizations.conference-rooms.participants.remove');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/mute',
+                    [ConferenceRoomController::class, 'muteParticipant'],
+                )->name('organizations.conference-rooms.participants.mute');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/unmute',
+                    [ConferenceRoomController::class, 'unmuteParticipant'],
+                )->name('organizations.conference-rooms.participants.unmute');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/video-off',
+                    [ConferenceRoomController::class, 'videoOffParticipant'],
+                )->name('organizations.conference-rooms.participants.video-off');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/video-on',
+                    [ConferenceRoomController::class, 'videoOnParticipant'],
+                )->name('organizations.conference-rooms.participants.video-on');
                 Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/leave',
                     [ConferenceRoomController::class, 'leave'],

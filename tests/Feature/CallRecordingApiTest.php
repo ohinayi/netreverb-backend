@@ -8,13 +8,17 @@ use App\Enums\CallMediaType;
 use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
+use App\Enums\CallRecordingUploadStatus;
+use App\Enums\CallSessionType;
 use App\Exceptions\FreeSwitchRecordingException;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
+use App\Services\CallRecordings\DirectVideoRecordingMuxer;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -128,6 +132,7 @@ class CallRecordingApiTest extends TestCase
     {
         Storage::fake('freeswitch_call_recordings');
         config()->set('telephony.webrtc.recording.direct_video_enabled', true);
+        config()->set('telephony.webrtc.recording.direct_video_strategy', 'freeswitch');
         config()->set('telephony.webrtc.recording.direct_video_container', 'mp4');
         config()->set('telephony.webrtc.recording.direct_video_start_command_template', 'luarun video_start.lua {call_uuid} {absolute_output_path} {container}');
         config()->set('telephony.webrtc.recording.direct_video_stop_command_template', 'luarun video_stop.lua {call_uuid} {absolute_output_path} {container}');
@@ -166,6 +171,207 @@ class CallRecordingApiTest extends TestCase
             ->assertJsonPath('data.recording.container', 'mp4');
 
         $this->assertStringEndsWith('.mp4', $response->json('data.recording.file_name'));
+    }
+
+    public function test_video_direct_call_can_stream_client_chunks_and_finalize_to_a_playable_recording(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+        config()->set('telephony.webrtc.recording.direct_video_enabled', true);
+        config()->set('telephony.webrtc.recording.direct_video_strategy', 'client_chunks');
+        config()->set('telephony.webrtc.recording.direct_video_container', 'webm');
+        config()->set('telephony.call_recordings.announcement.enabled', false);
+        config()->set('telephony.call_recordings.sync.enabled', false);
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'call-uuid-video-5678',
+            'media_type' => CallMediaType::Video,
+            'recording_status' => null,
+            'recording_url' => null,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('startRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
+                return $callUuid === 'call-uuid-video-5678'
+                    && str_ends_with($absolutePath, '.webm.audio.wav')
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
+            });
+        $gateway->shouldReceive('stopRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
+                return $callUuid === 'call-uuid-video-5678'
+                    && str_ends_with($absolutePath, '.webm.audio.wav')
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
+            });
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        $muxer = Mockery::mock(DirectVideoRecordingMuxer::class)->makePartial();
+        $muxer->shouldReceive('audioSidecarAbsolutePath')->passthru();
+        $muxer->shouldReceive('audioSidecarRelativePath')->passthru();
+        $muxer->shouldReceive('audioSidecarExists')->andReturn(true);
+        $muxer->shouldReceive('muxUploadedVideoWithServerAudio')->once();
+        $this->app->instance(DirectVideoRecordingMuxer::class, $muxer);
+
+        $startResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/start",
+            [
+                'recording_mode' => 'client_chunks',
+                'recording_container' => 'webm',
+                'recording_mime_type' => 'video/webm;codecs=vp9',
+            ],
+        );
+
+        $startResponse->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value)
+            ->assertJsonPath('data.recording.media_type', CallRecordingMediaType::Video->value)
+            ->assertJsonPath('data.recording.container', 'webm')
+            ->assertJsonPath('data.recording.upload.strategy', 'client_chunks')
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Pending->value)
+            ->assertJsonPath('data.recording.upload.next_sequence', 0);
+
+        $this->post(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/chunks",
+            [
+                'sequence' => 0,
+                'chunk' => UploadedFile::fake()->createWithContent('chunk-000.webm', 'video-chunk-one'),
+            ],
+        )->assertOk()
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Uploading->value)
+            ->assertJsonPath('data.recording.upload.next_sequence', 1);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/stop",
+        )->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value);
+
+        $finalizeResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/finalize",
+            [
+                'ended_at' => now()->toISOString(),
+            ],
+        );
+
+        $finalizeResponse->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.recording.playback_available', true)
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Completed->value);
+
+        $callLog->refresh();
+
+        Storage::disk('freeswitch_call_recordings')->assertExists($callLog->recording_file_path);
+
+        $this->assertSame(CallRecordingStatus::Completed, $callLog->recording_status);
+        $this->assertSame(CallRecordingMediaType::Video, $callLog->recording_media_type);
+    }
+
+    public function test_video_conference_call_can_stream_client_chunks_and_finalize_to_a_playable_recording(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+        config()->set('telephony.webrtc.recording.conference_video_enabled', true);
+        config()->set('telephony.webrtc.recording.conference_video_strategy', 'client_chunks');
+        config()->set('telephony.webrtc.recording.conference_video_container', 'webm');
+        config()->set('telephony.webrtc.recording.conference_audio_container', 'wav');
+        config()->set('telephony.call_recordings.announcement.enabled', false);
+        config()->set('telephony.call_recordings.sync.enabled', false);
+
+        $owner = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->owner()->for($organization)->for($owner)->create();
+        Sanctum::actingAs($owner);
+
+        $callLog = CallLog::factory()->for($organization)->create([
+            'freeswitch_uuid' => 'conference-uuid-9012',
+            'media_type' => CallMediaType::Video,
+            'session_type' => CallSessionType::Conference,
+            'recording_status' => null,
+            'recording_url' => null,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('startRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
+                return $callUuid === 'conference-uuid-9012'
+                    && str_ends_with($absolutePath, '.webm.audio.wav')
+                    && $profile->sessionType === CallSessionType::Conference
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
+            });
+        $gateway->shouldReceive('stopRecording')
+            ->once()
+            ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile): bool {
+                return $callUuid === 'conference-uuid-9012'
+                    && str_ends_with($absolutePath, '.webm.audio.wav')
+                    && $profile->sessionType === CallSessionType::Conference
+                    && $profile->mediaType === CallRecordingMediaType::Audio
+                    && $profile->container === 'wav';
+            });
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        $muxer = Mockery::mock(DirectVideoRecordingMuxer::class)->makePartial();
+        $muxer->shouldReceive('audioSidecarAbsolutePath')->passthru();
+        $muxer->shouldReceive('audioSidecarRelativePath')->passthru();
+        $muxer->shouldReceive('audioSidecarExists')->andReturn(true);
+        $muxer->shouldReceive('muxUploadedVideoWithServerAudio')->once();
+        $this->app->instance(DirectVideoRecordingMuxer::class, $muxer);
+
+        $startResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/start",
+            [
+                'recording_mode' => 'client_chunks',
+                'recording_container' => 'webm',
+                'recording_mime_type' => 'video/webm;codecs=vp9,opus',
+            ],
+        );
+
+        $startResponse->assertOk()
+            ->assertJsonPath('data.session_type', CallSessionType::Conference->value)
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value)
+            ->assertJsonPath('data.recording.media_type', CallRecordingMediaType::Video->value)
+            ->assertJsonPath('data.recording.container', 'webm')
+            ->assertJsonPath('data.recording.upload.strategy', 'client_chunks')
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Pending->value)
+            ->assertJsonPath('data.recording.upload.next_sequence', 0);
+
+        $this->post(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/chunks",
+            [
+                'sequence' => 0,
+                'chunk' => UploadedFile::fake()->createWithContent('conference-000.webm', 'conference-video-chunk'),
+            ],
+        )->assertOk()
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Uploading->value)
+            ->assertJsonPath('data.recording.upload.next_sequence', 1);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/stop",
+        )->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/recording/finalize",
+            [
+                'ended_at' => now()->toISOString(),
+            ],
+        )->assertOk()
+            ->assertJsonPath('data.recording.status', CallRecordingStatus::Completed->value)
+            ->assertJsonPath('data.recording.playback_available', true)
+            ->assertJsonPath('data.recording.upload.status', CallRecordingUploadStatus::Completed->value);
+
+        $callLog->refresh();
+
+        Storage::disk('freeswitch_call_recordings')->assertExists($callLog->recording_file_path);
+
+        $this->assertSame(CallRecordingStatus::Completed, $callLog->recording_status);
+        $this->assertSame(CallRecordingMediaType::Video, $callLog->recording_media_type);
     }
 
     public function test_start_recording_requires_a_freeswitch_uuid(): void

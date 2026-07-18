@@ -19,7 +19,7 @@ class SyncCallRecordingFromVps implements ShouldQueue
 
     public int $timeout = 120;
 
-    public function __construct(public int $callLogId)
+    public function __construct(public int $callLogId, public ?string $relativePath = null)
     {
         $this->onQueue('recordings');
     }
@@ -38,11 +38,21 @@ class SyncCallRecordingFromVps implements ShouldQueue
 
         $callLog = CallLog::query()->find($this->callLogId);
 
-        if ($callLog === null || $callLog->recording_file_path === null || $callLog->recording_file_path === '') {
+        if ($callLog === null) {
             return;
         }
 
-        $relativePath = dirname($callLog->recording_file_path);
+        $pathToSync = $this->relativePath;
+
+        if ($pathToSync === null || $pathToSync === '') {
+            $pathToSync = $callLog->recording_file_path;
+        }
+
+        if ($pathToSync === null || $pathToSync === '') {
+            return;
+        }
+
+        $relativePath = dirname($pathToSync);
         $normalizedRelativePath = $relativePath === '.' ? null : $relativePath;
 
         $synchronizer->sync(

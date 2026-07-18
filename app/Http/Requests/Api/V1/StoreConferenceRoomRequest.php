@@ -20,6 +20,7 @@ class StoreConferenceRoomRequest extends FormRequest
             'passcode' => ['sometimes', 'nullable', 'string', 'min:4', 'max:20', 'regex:/^[A-Za-z0-9]+$/'],
             'expires_in_minutes' => ['sometimes', 'nullable', 'integer', 'min:5', 'max:10080'],
             'configuration' => ['sometimes', 'nullable', 'array'],
+            'configuration.is_open' => ['sometimes', 'boolean'],
         ];
     }
 }

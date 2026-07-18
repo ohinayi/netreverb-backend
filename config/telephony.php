@@ -12,6 +12,13 @@ return [
     'conference_number_start' => (int) env('CONFERENCE_NUMBER_START', 45000000000),
     'conference_number_end' => (int) env('CONFERENCE_NUMBER_END', 45999999999),
     'conference_default_duration_minutes' => (int) env('CONFERENCE_DEFAULT_DURATION_MINUTES', 120),
+    'conference_waiting_room' => [
+        'max_pending' => (int) env('CONFERENCE_WAITING_ROOM_MAX_PENDING', 25),
+        'request_ttl_minutes' => (int) env('CONFERENCE_WAITING_ROOM_REQUEST_TTL_MINUTES', 10),
+    ],
+    'conference_participants' => [
+        'stale_after_seconds' => (int) env('CONFERENCE_PARTICIPANT_STALE_AFTER_SECONDS', 90),
+    ],
     'recordings' => [
         'disk' => env('FREESWITCH_RECORDINGS_DISK', 'freeswitch_recordings'),
         'base_path' => env('FREESWITCH_RECORDINGS_BASE_PATH', env('FREESWITCH_RECORDINGS_DIR', storage_path('app/public/recordings/conferences'))),
@@ -32,6 +39,10 @@ return [
             'user' => env('FREESWITCH_CALL_RECORDINGS_SYNC_USER', 'deploy'),
             'password' => env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD'),
             'remote_base' => env('FREESWITCH_CALL_RECORDINGS_SYNC_REMOTE_BASE', '/usr/local/freeswitch/var/lib/freeswitch/recordings/calls'),
+        ],
+        'direct_video_mux' => [
+            'ffmpeg_binary' => env('FREESWITCH_CALL_RECORDINGS_DIRECT_VIDEO_MUX_FFMPEG_BINARY', 'ffmpeg'),
+            'timeout_seconds' => (int) env('FREESWITCH_CALL_RECORDINGS_DIRECT_VIDEO_MUX_TIMEOUT_SECONDS', 180),
         ],
     ],
     'freeswitch' => [
@@ -54,15 +65,21 @@ return [
         'recording' => [
             'direct_audio_enabled' => env('WEBRTC_RECORDING_DIRECT_AUDIO_ENABLED', true),
             'direct_video_enabled' => env('WEBRTC_RECORDING_DIRECT_VIDEO_ENABLED', false),
+            'direct_video_strategy' => env('WEBRTC_RECORDING_DIRECT_VIDEO_STRATEGY', 'freeswitch'),
             'direct_audio_container' => env('WEBRTC_RECORDING_DIRECT_AUDIO_CONTAINER', 'wav'),
             'direct_video_container' => env('WEBRTC_RECORDING_DIRECT_VIDEO_CONTAINER', 'mp4'),
             'direct_video_start_command_template' => env('WEBRTC_RECORDING_DIRECT_VIDEO_START_COMMAND_TEMPLATE'),
             'direct_video_stop_command_template' => env('WEBRTC_RECORDING_DIRECT_VIDEO_STOP_COMMAND_TEMPLATE'),
+            'direct_video_chunk_duration_ms' => (int) env('WEBRTC_RECORDING_DIRECT_VIDEO_CHUNK_DURATION_MS', 4000),
+            'direct_video_max_chunk_size_kb' => (int) env('WEBRTC_RECORDING_DIRECT_VIDEO_MAX_CHUNK_SIZE_KB', 8192),
             'conference_audio_enabled' => env('WEBRTC_RECORDING_CONFERENCE_AUDIO_ENABLED', true),
             'conference_video_enabled' => env('WEBRTC_RECORDING_CONFERENCE_VIDEO_ENABLED', false),
+            'conference_video_strategy' => env('WEBRTC_RECORDING_CONFERENCE_VIDEO_STRATEGY', 'client_chunks'),
             'conference_screen_share_enabled' => env('WEBRTC_RECORDING_CONFERENCE_SCREEN_SHARE_ENABLED', false),
             'conference_audio_container' => env('WEBRTC_RECORDING_CONFERENCE_AUDIO_CONTAINER', 'wav'),
             'conference_video_container' => env('WEBRTC_RECORDING_CONFERENCE_VIDEO_CONTAINER', 'mp4'),
+            'conference_video_chunk_duration_ms' => (int) env('WEBRTC_RECORDING_CONFERENCE_VIDEO_CHUNK_DURATION_MS', 4000),
+            'conference_video_max_chunk_size_kb' => (int) env('WEBRTC_RECORDING_CONFERENCE_VIDEO_MAX_CHUNK_SIZE_KB', 8192),
         ],
         'video' => [
             'width' => [

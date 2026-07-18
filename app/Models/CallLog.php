@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
@@ -76,6 +77,11 @@ class CallLog extends Model
     public function calleeExtension(): BelongsTo
     {
         return $this->belongsTo(Extension::class, 'callee_extension_id');
+    }
+
+    public function recordingUpload(): HasOne
+    {
+        return $this->hasOne(CallRecordingUpload::class);
     }
 
     protected function casts(): array
