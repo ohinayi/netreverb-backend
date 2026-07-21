@@ -18,6 +18,7 @@ return [
     ],
     'conference_participants' => [
         'stale_after_seconds' => (int) env('CONFERENCE_PARTICIPANT_STALE_AFTER_SECONDS', 90),
+        'missed_reconciliations_before_leave' => (int) env('CONFERENCE_PARTICIPANT_MISSED_RECONCILIATIONS_BEFORE_LEAVE', 2),
     ],
     'recordings' => [
         'disk' => env('FREESWITCH_RECORDINGS_DISK', 'freeswitch_recordings'),

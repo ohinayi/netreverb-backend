@@ -42,12 +42,24 @@ class ConferenceRoomParticipantPresenceTest extends TestCase
             'left_at' => null,
         ]);
 
+        config()->set('telephony.conference_participants.missed_reconciliations_before_leave', 2);
+
         $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
-        $gateway->shouldReceive('listMembers')->once()->with($conferenceRoom->sip_number)->andReturn([]);
+        $gateway->shouldReceive('listMembers')->twice()->with($conferenceRoom->sip_number)->andReturn([]);
         $gateway->shouldReceive('kickMember')->never();
         $gateway->shouldReceive('stopRecording')->zeroOrMoreTimes();
         $gateway->shouldReceive('startRecording')->zeroOrMoreTimes();
         $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
+
+        $this->artisan('conference-rooms:reconcile-participants')
+            ->assertExitCode(0);
+
+        $participant->refresh();
+
+        $this->assertSame(ConferenceParticipantStatus::Joined, $participant->status);
+        $this->assertNull($participant->left_at);
+        $this->assertSame(1, data_get($participant->metadata, 'presence_reconcile.miss_count'));
+        $this->assertNotNull(data_get($participant->metadata, 'presence_reconcile.last_missing_at'));
 
         $this->artisan('conference-rooms:reconcile-participants')
             ->assertExitCode(0);
@@ -110,6 +122,120 @@ class ConferenceRoomParticipantPresenceTest extends TestCase
 
         $this->assertSame(ConferenceParticipantStatus::Joined, $participant->status);
         $this->assertNull($participant->left_at);
+    }
+
+    public function test_reconcile_command_clears_transient_miss_state_once_participant_is_seen_again(): void
+    {
+        config()->set('telephony.conference_participants.missed_reconciliations_before_leave', 2);
+
+        $user = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($user)->create();
+
+        $dialableNumber = DialableNumber::factory()->create([
+            'organization_id' => $organization->id,
+            'number' => '302990',
+        ]);
+
+        Extension::factory()->for($organization)->for($user)->for($dialableNumber)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($user, 'hostUser')->create([
+            'sip_number' => '45000000014',
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($user)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $user->name,
+            'email' => $user->email,
+            'joined_at' => now()->subMinutes(5),
+            'left_at' => null,
+            'metadata' => [
+                'presence_reconcile' => [
+                    'miss_count' => 1,
+                    'last_missing_at' => now()->subSeconds(30)->toIso8601String(),
+                ],
+            ],
+        ]);
+
+        CallLog::factory()->for($organization)->create([
+            'caller_number' => '302990',
+            'callee_number' => '45000000014',
+            'status' => CallStatus::InProgress,
+            'freeswitch_uuid' => 'fs-live-member-uuid-reset',
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+        $gateway->shouldReceive('listMembers')->once()->with($conferenceRoom->sip_number)->andReturn([
+            [
+                'member_id' => '14',
+                'caller_number' => null,
+                'caller_name' => 'Phone participant',
+                'uuid' => 'fs-live-member-uuid-reset',
+            ],
+        ]);
+        $gateway->shouldReceive('kickMember')->never();
+        $gateway->shouldReceive('stopRecording')->zeroOrMoreTimes();
+        $gateway->shouldReceive('startRecording')->zeroOrMoreTimes();
+        $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
+
+        $this->artisan('conference-rooms:reconcile-participants')
+            ->assertExitCode(0);
+
+        $participant->refresh();
+
+        $this->assertSame(ConferenceParticipantStatus::Joined, $participant->status);
+        $this->assertNull($participant->left_at);
+        $this->assertSame(0, data_get($participant->metadata, 'presence_reconcile.miss_count'));
+        $this->assertNull(data_get($participant->metadata, 'presence_reconcile.last_missing_at'));
+    }
+
+    public function test_reconcile_command_marks_participant_left_when_remaining_member_only_matches_by_shared_number_but_name_differs(): void
+    {
+        config()->set('telephony.conference_participants.missed_reconciliations_before_leave', 1);
+
+        $host = User::factory()->create(['name' => 'Host User']);
+        $guest = User::factory()->create(['name' => 'Guest User']);
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($guest)->create();
+
+        $sharedDialableNumber = DialableNumber::factory()->create([
+            'organization_id' => $organization->id,
+            'number' => '100000',
+        ]);
+
+        Extension::factory()->for($organization)->for($guest)->for($sharedDialableNumber)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($guest)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $guest->name,
+            'email' => $guest->email,
+            'joined_at' => now()->subMinutes(5),
+            'left_at' => null,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+        $gateway->shouldReceive('listMembers')->once()->with($conferenceRoom->sip_number)->andReturn([
+            [
+                'member_id' => '18',
+                'caller_number' => '100000',
+                'caller_name' => $host->name,
+                'uuid' => 'host-still-live',
+            ],
+        ]);
+        $gateway->shouldReceive('kickMember')->never();
+        $gateway->shouldReceive('stopRecording')->zeroOrMoreTimes();
+        $gateway->shouldReceive('startRecording')->zeroOrMoreTimes();
+        $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
+
+        $this->artisan('conference-rooms:reconcile-participants')
+            ->assertExitCode(0);
+
+        $participant->refresh();
+
+        $this->assertSame(ConferenceParticipantStatus::Left, $participant->status);
+        $this->assertNotNull($participant->left_at);
     }
 
     public function test_host_can_remove_participant(): void

@@ -17,6 +17,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\InviteConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\JoinConferenceRoomByInviteRequest;
 use App\Http\Requests\Api\V1\JoinConferenceRoomRequest;
+use App\Http\Requests\Api\V1\LeaveConferenceRoomByInviteRequest;
 use App\Http\Requests\Api\V1\ModerateConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\ResolveConferenceRoomInviteRequest;
 use App\Http\Requests\Api\V1\StoreConferenceRoomRequest;
@@ -186,6 +187,24 @@ class ConferenceRoomController extends Controller
         $conferenceRoom->setAttribute('join_sip_number', $conferenceRoom->sip_number);
 
         return ConferenceRoomResource::make($conferenceRoom);
+    }
+
+    public function leaveByInvite(LeaveConferenceRoomByInviteRequest $request): ConferenceRoomResource
+    {
+        $conferenceRoom = $this->resolveConferenceRoomByInviteCode($request->string('invite_code')->toString());
+
+        Gate::authorize('resolveInvite', $conferenceRoom);
+
+        $this->leaveConferenceRoom->execute($conferenceRoom, $request->user());
+
+        return ConferenceRoomResource::make(
+            $this->attachInviteContext(
+                $conferenceRoom
+                    ->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])
+                    ->loadCount('participants'),
+                $request->user(),
+            ),
+        );
     }
 
     public function waitingParticipants(

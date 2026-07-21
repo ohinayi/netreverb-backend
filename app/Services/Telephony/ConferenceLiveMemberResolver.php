@@ -65,9 +65,27 @@ class ConferenceLiveMemberResolver
             $participant->user?->email,
         ], static fn (?string $value): bool => is_string($value) && trim($value) !== ''));
 
-        return in_array($member['caller_number'], $expectedNumbers, true)
-            || in_array($member['uuid'] ?? null, $expectedUuids, true)
-            || in_array($member['caller_name'], $expectedNames, true);
+        $matchesByUuid = in_array($member['uuid'] ?? null, $expectedUuids, true);
+        $matchesByName = in_array($member['caller_name'], $expectedNames, true);
+        $matchesByNumber = in_array($member['caller_number'], $expectedNumbers, true);
+
+        if ($matchesByUuid || $matchesByName) {
+            return true;
+        }
+
+        if (! $matchesByNumber) {
+            return false;
+        }
+
+        $memberCallerName = is_string($member['caller_name'] ?? null)
+            ? trim((string) $member['caller_name'])
+            : '';
+
+        if ($memberCallerName !== '' && $expectedNames !== []) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

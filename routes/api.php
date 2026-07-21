@@ -50,6 +50,8 @@ Route::prefix('v1')->group(function (): void {
                 ->name('conference-rooms.resolve');
             Route::post('conference-rooms/join-by-invite', [ConferenceRoomController::class, 'joinByInvite'])
                 ->name('conference-rooms.join-by-invite');
+            Route::post('conference-rooms/leave-by-invite', [ConferenceRoomController::class, 'leaveByInvite'])
+                ->name('conference-rooms.leave-by-invite');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
             Route::get('people/search', [FriendshipController::class, 'search']);

@@ -184,6 +184,45 @@ class ConferenceRoomApiTest extends TestCase
             ->assertJsonPath('data.sip_number', $conferenceRoom->sip_number);
     }
 
+    public function test_member_can_leave_room_from_invite_without_org_scoped_url(): void
+    {
+        $host = User::factory()->create();
+        $guest = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($guest)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'role' => 'host',
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($guest)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'role' => 'participant',
+            'display_name' => $guest->name,
+            'email' => $guest->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+
+        Sanctum::actingAs($guest);
+
+        $this->postJson('/api/v1/conference-rooms/leave-by-invite', [
+            'invite_code' => $conferenceRoom->invite_code,
+        ])->assertOk()
+            ->assertJsonPath('data.current_user_participant.status', ConferenceParticipantStatus::Left->value)
+            ->assertJsonPath('data.public_id', $conferenceRoom->public_id);
+
+        $participant->refresh();
+
+        $this->assertSame(ConferenceParticipantStatus::Left, $participant->status);
+        $this->assertNotNull($participant->left_at);
+    }
+
     public function test_same_organization_member_is_placed_in_waiting_room_by_default(): void
     {
         $host = User::factory()->create();
