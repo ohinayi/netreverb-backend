@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'title',
     'status',
     'passcode_hash',
+    'starts_at',
     'expires_at',
     'ended_at',
     'ended_by_user_id',
@@ -71,6 +72,11 @@ class ConferenceRoom extends Model
         return $this->hasMany(ConferenceRecording::class);
     }
 
+    public function reactions(): HasMany
+    {
+        return $this->hasMany(ConferenceRoomReaction::class);
+    }
+
     public function conferenceRecordings(): HasMany
     {
         return $this->recordings();
@@ -85,6 +91,7 @@ class ConferenceRoom extends Model
     {
         return [
             'status' => ConferenceRoomStatus::class,
+            'starts_at' => 'datetime',
             'expires_at' => 'datetime',
             'ended_at' => 'datetime',
             'configuration' => 'array',

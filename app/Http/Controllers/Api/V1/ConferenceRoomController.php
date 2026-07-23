@@ -9,10 +9,13 @@ use App\Actions\ConferenceRooms\JoinConferenceRoom;
 use App\Actions\ConferenceRooms\LeaveConferenceRoom;
 use App\Actions\ConferenceRooms\ModerateConferenceRoomParticipant;
 use App\Actions\ConferenceRooms\ModerateConferenceRoomParticipantMedia;
+use App\Actions\ConferenceRooms\PublishConferenceRoomReaction;
 use App\Actions\ConferenceRooms\RemoveConferenceRoomParticipant;
 use App\Actions\ConferenceRooms\RequestConferenceRoomEntry;
 use App\Actions\ConferenceRooms\TouchConferenceRoomExpiry;
+use App\Actions\ConferenceRooms\UpdateConferenceRoomParticipantScreenShare;
 use App\Enums\ConferenceParticipantStatus;
+use App\Enums\ConferenceRoomStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\InviteConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\JoinConferenceRoomByInviteRequest;
@@ -20,6 +23,7 @@ use App\Http\Requests\Api\V1\JoinConferenceRoomRequest;
 use App\Http\Requests\Api\V1\LeaveConferenceRoomByInviteRequest;
 use App\Http\Requests\Api\V1\ModerateConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\ResolveConferenceRoomInviteRequest;
+use App\Http\Requests\Api\V1\StoreConferenceRoomReactionRequest;
 use App\Http\Requests\Api\V1\StoreConferenceRoomRequest;
 use App\Http\Resources\Api\V1\ConferenceRoomParticipantResource;
 use App\Http\Resources\Api\V1\ConferenceRoomResource;
@@ -27,6 +31,7 @@ use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,8 +52,11 @@ class ConferenceRoomController extends Controller
         private RequestConferenceRoomEntry $requestConferenceRoomEntry,
         private ModerateConferenceRoomParticipant $moderateConferenceRoomParticipant,
         private ModerateConferenceRoomParticipantMedia $moderateConferenceRoomParticipantMedia,
+        private UpdateConferenceRoomParticipantScreenShare $updateConferenceRoomParticipantScreenShare,
+        private PublishConferenceRoomReaction $publishConferenceRoomReaction,
         private RemoveConferenceRoomParticipant $removeConferenceRoomParticipant,
         private TouchConferenceRoomExpiry $touchConferenceRoomExpiry,
+        private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
     public function index(Organization $organization): AnonymousResourceCollection
@@ -69,16 +77,21 @@ class ConferenceRoomController extends Controller
     {
         Gate::authorize('create', [ConferenceRoom::class, $organization]);
 
+        $validated = $request->validated();
+
         $conferenceRoom = $this->createConferenceRoom->execute(
             $organization,
             $request->user(),
             [
-                'title' => $request->string('title')->toString(),
-                'passcode' => $request->input('passcode'),
-                'expires_at' => $request->filled('expires_in_minutes')
-                    ? now()->addMinutes((int) $request->integer('expires_in_minutes'))
-                    : null,
-                'configuration' => $request->input('configuration'),
+                'title' => $validated['title'],
+                'passcode' => $validated['passcode'] ?? null,
+                'starts_at' => $request->date('starts_at'),
+                'expires_at' => $request->date('expires_at')
+                    ?? (($validated['expires_in_minutes'] ?? null) !== null
+                        ? now()->addMinutes((int) $validated['expires_in_minutes'])
+                        : null),
+                'duration_minutes' => $validated['duration_minutes'] ?? null,
+                'configuration' => $validated['configuration'] ?? null,
             ],
         );
 
@@ -94,16 +107,19 @@ class ConferenceRoomController extends Controller
 
         Gate::authorize('resolveInvite', $conferenceRoom);
 
-        return ConferenceRoomResource::make($this->attachInviteContext($conferenceRoom, $request->user()));
+        return ConferenceRoomResource::make(
+            $this->loadConferenceRoomResponse(
+                $this->attachInviteContext($conferenceRoom, $request->user()),
+                $this->shouldExposeInviteRoster($conferenceRoom->getRelation('currentUserParticipant')),
+            ),
+        );
     }
 
     public function show(Organization $organization, ConferenceRoom $conferenceRoom): ConferenceRoomResource
     {
         Gate::authorize('view', $conferenceRoom);
 
-        return ConferenceRoomResource::make(
-            $conferenceRoom->load(['organization', 'hostUser', 'endedByUser', 'participants.user'])->loadCount('participants'),
-        );
+        return ConferenceRoomResource::make($this->loadConferenceRoomResponse($conferenceRoom));
     }
 
     public function join(
@@ -128,7 +144,12 @@ class ConferenceRoomController extends Controller
                 $participant,
             );
 
-            return ConferenceRoomResource::make($conferenceRoom)
+            return ConferenceRoomResource::make(
+                $this->loadConferenceRoomResponse(
+                    $conferenceRoom,
+                    $this->shouldExposeInviteRoster($conferenceRoom->getRelation('currentUserParticipant')),
+                ),
+            )
                 ->response()
                 ->setStatusCode(Response::HTTP_ACCEPTED);
         }
@@ -144,7 +165,7 @@ class ConferenceRoomController extends Controller
             ->loadCount('participants');
         $conferenceRoom->setAttribute('join_sip_number', $conferenceRoom->sip_number);
 
-        return ConferenceRoomResource::make($conferenceRoom);
+        return ConferenceRoomResource::make($this->loadConferenceRoomResponse($conferenceRoom));
     }
 
     public function joinByInvite(JoinConferenceRoomByInviteRequest $request): JsonResponse|ConferenceRoomResource
@@ -167,7 +188,12 @@ class ConferenceRoomController extends Controller
                 $participant,
             );
 
-            return ConferenceRoomResource::make($conferenceRoom)
+            return ConferenceRoomResource::make(
+                $this->loadConferenceRoomResponse(
+                    $conferenceRoom,
+                    $this->shouldExposeInviteRoster($conferenceRoom->getRelation('currentUserParticipant')),
+                ),
+            )
                 ->response()
                 ->setStatusCode(Response::HTTP_ACCEPTED);
         }
@@ -186,7 +212,7 @@ class ConferenceRoomController extends Controller
         );
         $conferenceRoom->setAttribute('join_sip_number', $conferenceRoom->sip_number);
 
-        return ConferenceRoomResource::make($conferenceRoom);
+        return ConferenceRoomResource::make($this->loadConferenceRoomResponse($conferenceRoom));
     }
 
     public function leaveByInvite(LeaveConferenceRoomByInviteRequest $request): ConferenceRoomResource
@@ -197,13 +223,77 @@ class ConferenceRoomController extends Controller
 
         $this->leaveConferenceRoom->execute($conferenceRoom, $request->user());
 
+        $conferenceRoom = $this->attachInviteContext(
+            $conferenceRoom
+                ->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])
+                ->loadCount('participants'),
+            $request->user(),
+        );
+
         return ConferenceRoomResource::make(
-            $this->attachInviteContext(
-                $conferenceRoom
-                    ->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])
-                    ->loadCount('participants'),
-                $request->user(),
+            $this->loadConferenceRoomResponse(
+                $conferenceRoom,
+                $this->shouldExposeInviteRoster($conferenceRoom->getRelation('currentUserParticipant')),
             ),
+        );
+    }
+
+    public function heartbeat(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+    ): JsonResponse|ConferenceRoomParticipantResource {
+        Gate::authorize('join', $conferenceRoom);
+
+        $conferenceRoom = $this->ensureConferenceRoomAvailable($conferenceRoom);
+        $participant = $this->resolveCurrentUserParticipant($conferenceRoom, $request->user());
+
+        if ($participant->status !== ConferenceParticipantStatus::Joined) {
+            throw ValidationException::withMessages([
+                'conference_room' => 'You are not an active participant in this meeting.',
+            ]);
+        }
+
+        $this->participantPresenceService->touchHeartbeat($participant);
+
+        return ConferenceRoomParticipantResource::make($participant->fresh(['user']));
+    }
+
+    public function disconnect(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+    ): ConferenceRoomResource {
+        Gate::authorize('join', $conferenceRoom);
+
+        $conferenceRoom = $this->ensureConferenceRoomAvailable($conferenceRoom);
+        $participant = $this->resolveCurrentUserParticipant($conferenceRoom, $request->user());
+
+        if ($participant->status !== ConferenceParticipantStatus::Joined) {
+            throw ValidationException::withMessages([
+                'conference_room' => 'You are not an active participant in this meeting.',
+            ]);
+        }
+
+        $reason = trim((string) $request->input('reason', ''));
+
+        if (in_array($reason, ['network_loss', 'heartbeat_timeout'], true)) {
+            $this->participantPresenceService->markDisconnected($participant, $reason);
+        } else {
+            $this->participantPresenceService->markLeft($participant, $reason !== '' ? $reason : 'browser_close');
+        }
+
+        $conferenceRoom = $conferenceRoom
+            ->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])
+            ->loadCount('participants');
+        $conferenceRoom = $this->attachInviteContext(
+            $conferenceRoom,
+            $request->user(),
+            $participant->fresh(['user']),
+        );
+
+        return ConferenceRoomResource::make(
+            $this->loadConferenceRoomResponse($conferenceRoom),
         );
     }
 
@@ -348,6 +438,100 @@ class ConferenceRoomController extends Controller
         );
     }
 
+    public function screenShareOffParticipant(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+    ): JsonResource {
+        Gate::authorize('moderateParticipant', $conferenceRoom);
+        $this->ensureParticipantBelongsToRoom($conferenceRoom, $participant, null);
+
+        return ConferenceRoomParticipantResource::make(
+            $this->updateConferenceRoomParticipantScreenShare->forceStop(
+                $conferenceRoom,
+                $participant,
+                $request->user(),
+            ),
+        );
+    }
+
+    public function screenShareOnParticipant(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+    ): JsonResource {
+        Gate::authorize('moderateParticipant', $conferenceRoom);
+        $this->ensureParticipantBelongsToRoom($conferenceRoom, $participant, null);
+
+        return ConferenceRoomParticipantResource::make(
+            $this->updateConferenceRoomParticipantScreenShare->allow(
+                $conferenceRoom,
+                $participant,
+                $request->user(),
+            ),
+        );
+    }
+
+    public function startScreenShare(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+    ): JsonResource {
+        Gate::authorize('resolveInvite', $conferenceRoom);
+        $this->ensureParticipantBelongsToRoom($conferenceRoom, $participant, null);
+        $this->ensureParticipantBelongsToCurrentUser($participant, $request->user());
+
+        return ConferenceRoomParticipantResource::make(
+            $this->updateConferenceRoomParticipantScreenShare->start(
+                $conferenceRoom,
+                $participant,
+                $request->user(),
+            ),
+        );
+    }
+
+    public function stopScreenShare(
+        Request $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+    ): JsonResource {
+        Gate::authorize('resolveInvite', $conferenceRoom);
+        $this->ensureParticipantBelongsToRoom($conferenceRoom, $participant, null);
+        $this->ensureParticipantBelongsToCurrentUser($participant, $request->user());
+
+        return ConferenceRoomParticipantResource::make(
+            $this->updateConferenceRoomParticipantScreenShare->stop(
+                $conferenceRoom,
+                $participant,
+                $request->user(),
+            ),
+        );
+    }
+
+    public function react(
+        StoreConferenceRoomReactionRequest $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+    ): ConferenceRoomResource {
+        Gate::authorize('resolveInvite', $conferenceRoom);
+
+        $conferenceRoom = $this->ensureConferenceRoomAvailable($conferenceRoom);
+        $this->publishConferenceRoomReaction->execute($conferenceRoom, $request->user(), $request->validated());
+
+        return ConferenceRoomResource::make(
+            $this->loadConferenceRoomResponse(
+                $this->attachInviteContext(
+                    $conferenceRoom->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user']),
+                    $request->user(),
+                ),
+            ),
+        );
+    }
+
     public function invite(
         InviteConferenceRoomParticipantRequest $request,
         Organization $organization,
@@ -428,6 +612,53 @@ class ConferenceRoomController extends Controller
         return $conferenceRoom;
     }
 
+    private function loadConferenceRoomResponse(
+        ConferenceRoom $conferenceRoom,
+        bool $includeParticipants = true,
+    ): ConferenceRoom {
+        $this->reconcileConferenceRoomPresence($conferenceRoom);
+
+        $relations = [
+            'organization',
+            'hostUser',
+            'endedByUser',
+        ];
+
+        if ($includeParticipants) {
+            $relations[] = 'participants.user';
+            $relations['reactions'] = function ($query): void {
+                $query->where(function ($query): void {
+                    $query->whereNull('expires_at')
+                        ->orWhere('expires_at', '>', now());
+                })->with(['participant.user', 'user'])->latest('id');
+            };
+        }
+
+        $conferenceRoom->load($relations)->loadCount('participants');
+
+        if ($conferenceRoom->relationLoaded('currentUserParticipant')
+            && $conferenceRoom->getRelation('currentUserParticipant') instanceof ConferenceRoomParticipant
+        ) {
+            $conferenceRoom->setRelation(
+                'currentUserParticipant',
+                ConferenceRoomParticipant::query()
+                    ->with('user')
+                    ->find($conferenceRoom->getRelation('currentUserParticipant')->id),
+            );
+        }
+
+        return $conferenceRoom;
+    }
+
+    private function reconcileConferenceRoomPresence(ConferenceRoom $conferenceRoom): void
+    {
+        if ($conferenceRoom->status !== ConferenceRoomStatus::Active) {
+            return;
+        }
+
+        $this->participantPresenceService->reconcileRoom($conferenceRoom);
+    }
+
     private function canJoinDirectly(
         ConferenceRoom $conferenceRoom,
         User $user,
@@ -488,6 +719,25 @@ class ConferenceRoomController extends Controller
         );
     }
 
+    private function resolveCurrentUserParticipant(
+        ConferenceRoom $conferenceRoom,
+        User $user,
+    ): ConferenceRoomParticipant {
+        $participant = $conferenceRoom->participants()
+            ->with('user')
+            ->where('user_id', $user->id)
+            ->latest('id')
+            ->first();
+
+        if ($participant === null) {
+            throw ValidationException::withMessages([
+                'conference_room' => 'You are not a participant in this meeting.',
+            ]);
+        }
+
+        return $participant;
+    }
+
     private function ensureParticipantBelongsToRoom(
         ConferenceRoom $conferenceRoom,
         ConferenceRoomParticipant $conferenceParticipant,
@@ -501,6 +751,15 @@ class ConferenceRoomController extends Controller
             throw ValidationException::withMessages([
                 'invite_code' => 'The meeting invite code is invalid.',
             ]);
+        }
+    }
+
+    private function ensureParticipantBelongsToCurrentUser(
+        ConferenceRoomParticipant $conferenceParticipant,
+        User $user,
+    ): void {
+        if ($conferenceParticipant->user_id !== $user->id) {
+            abort(Response::HTTP_FORBIDDEN);
         }
     }
 }

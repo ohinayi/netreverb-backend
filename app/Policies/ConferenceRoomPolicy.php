@@ -2,10 +2,12 @@
 
 namespace App\Policies;
 
+use App\Enums\ConferenceParticipantStatus;
 use App\Enums\ConferenceRoomStatus;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
 use App\Models\ConferenceRoom;
+use App\Models\ConferenceRoomParticipant;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
@@ -43,6 +45,23 @@ class ConferenceRoomPolicy
     public function resolveInvite(User $user, ConferenceRoom $conferenceRoom): bool
     {
         return $conferenceRoom->status === ConferenceRoomStatus::Active;
+    }
+
+    public function chat(User $user, ConferenceRoom $conferenceRoom): bool
+    {
+        if ($conferenceRoom->status !== ConferenceRoomStatus::Active) {
+            return false;
+        }
+
+        if ($conferenceRoom->host_user_id === $user->id) {
+            return true;
+        }
+
+        return ConferenceRoomParticipant::query()
+            ->where('conference_room_id', $conferenceRoom->id)
+            ->where('user_id', $user->id)
+            ->where('status', ConferenceParticipantStatus::Joined->value)
+            ->exists();
     }
 
     public function viewWaitingRoom(User $user, ConferenceRoom $conferenceRoom): bool

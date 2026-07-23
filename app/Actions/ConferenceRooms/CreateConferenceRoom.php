@@ -9,6 +9,7 @@ use App\Models\ConferenceRoomParticipant;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -20,19 +21,28 @@ class CreateConferenceRoom
         private AllocateConferenceRoomNumber $allocateConferenceRoomNumber,
         private GenerateConferenceRoomInviteCode $generateConferenceRoomInviteCode,
         private ConferenceRecordingManager $recordingManager,
+        private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
     /**
      * @param array{
      *     title: string,
      *     passcode?: ?string,
+     *     starts_at?: ?Carbon,
      *     expires_at?: ?Carbon,
+     *     duration_minutes?: ?int,
      *     configuration?: ?array<string, mixed>,
      * } $attributes
      */
     public function execute(Organization $organization, User $host, array $attributes): ConferenceRoom
     {
         $conferenceRoom = DB::transaction(function () use ($organization, $host, $attributes): ConferenceRoom {
+            $startsAt = $attributes['starts_at'] ?? now();
+            $expiresAt = $attributes['expires_at']
+                ?? $startsAt->copy()->addMinutes(
+                    (int) ($attributes['duration_minutes'] ?? config('telephony.conference_default_duration_minutes')),
+                );
+
             $conferenceRoom = ConferenceRoom::query()->create([
                 'organization_id' => $organization->id,
                 'host_user_id' => $host->id,
@@ -44,8 +54,8 @@ class CreateConferenceRoom
                 'passcode_hash' => isset($attributes['passcode']) && $attributes['passcode'] !== null
                     ? Hash::make($attributes['passcode'])
                     : null,
-                'expires_at' => $attributes['expires_at']
-                    ?? now()->addMinutes(config('telephony.conference_default_duration_minutes')),
+                'starts_at' => $startsAt,
+                'expires_at' => $expiresAt,
                 'configuration' => $this->normalizeConfiguration($attributes['configuration'] ?? null),
             ]);
 
@@ -67,6 +77,9 @@ class CreateConferenceRoom
             return $conferenceRoom->load(['organization', 'hostUser', 'participants.user']);
         }, attempts: 3);
 
+        $this->participantPresenceService->touchHeartbeat(
+            $conferenceRoom->participants()->whereBelongsTo($host)->sole(),
+        );
         $this->recordingManager->start($conferenceRoom);
 
         return $conferenceRoom;

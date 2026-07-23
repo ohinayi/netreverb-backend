@@ -2,16 +2,22 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Enums\ConferenceParticipantStatus;
 use App\Enums\ConferenceRoomStatus;
 use App\Enums\MembershipRole;
+use App\Events\ConferenceRoomScreenShareUpdated;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
+use App\Models\ConferenceRoomReaction;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class ConferenceRoomApiTest extends TestCase
@@ -124,7 +130,9 @@ class ConferenceRoomApiTest extends TestCase
 
         $joinResponse->assertOk()
             ->assertJsonPath('data.sip_number', ConferenceRoom::query()->sole()->sip_number)
-            ->assertJsonPath('data.current_user_participant.status', ConferenceParticipantStatus::Joined->value);
+            ->assertJsonPath('data.current_user_participant.status', ConferenceParticipantStatus::Joined->value)
+            ->assertJsonPath('data.current_user_participant.screen_share.is_sharing', false)
+            ->assertJsonPath('data.current_user_participant.screen_share.blocked_by_host', false);
 
         $this->postJson(
             "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoomPublicId}/join",
@@ -485,5 +493,357 @@ class ConferenceRoomApiTest extends TestCase
         $conferenceRoom->refresh();
 
         $this->assertSame(ConferenceRoomStatus::Expired, $conferenceRoom->status);
+    }
+
+    public function test_admin_can_create_a_conference_room_with_an_explicit_schedule_window(): void
+    {
+        $admin = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $startsAt = now()->addDay()->setTime(9, 30);
+        $expiresAt = $startsAt->copy()->addHours(3);
+
+        $response = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms",
+            [
+                'title' => 'Quarterly planning',
+                'starts_at' => $startsAt->toISOString(),
+                'expires_at' => $expiresAt->toISOString(),
+            ],
+        );
+
+        $response->assertCreated();
+
+        $conferenceRoom = ConferenceRoom::query()->sole();
+
+        $this->assertTrue($conferenceRoom->starts_at->equalTo($startsAt));
+        $this->assertTrue($conferenceRoom->expires_at->equalTo($expiresAt));
+    }
+
+    public function test_host_can_block_and_restore_screen_sharing_for_a_participant(): void
+    {
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+            'metadata' => [
+                'screen_share' => [
+                    'active' => true,
+                    'started_at' => now()->subMinutes(2)->toIso8601String(),
+                ],
+            ],
+        ]);
+        $this->touchPresenceHeartbeat($hostParticipant);
+        $this->touchPresenceHeartbeat($participant);
+        $this->fakeConferenceControlForParticipants($conferenceRoom, 2, $participant);
+
+        Event::fake([ConferenceRoomScreenShareUpdated::class]);
+        Sanctum::actingAs($host);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$participant->public_id}/screen-share-off",
+        )->assertOk()
+            ->assertJsonPath('data.screen_share.is_sharing', false)
+            ->assertJsonPath('data.screen_share.blocked_by_host', true);
+
+        Event::assertDispatched(ConferenceRoomScreenShareUpdated::class, function (ConferenceRoomScreenShareUpdated $event) use ($conferenceRoom, $participant): bool {
+            return $event->conferenceRoom->is($conferenceRoom)
+                && $event->participant->is($participant)
+                && $event->action === 'blocked'
+                && $event->source === 'screen';
+        });
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$participant->public_id}/screen-share-on",
+        )->assertOk()
+            ->assertJsonPath('data.screen_share.blocked_by_host', false);
+
+        Event::assertDispatched(ConferenceRoomScreenShareUpdated::class, function (ConferenceRoomScreenShareUpdated $event) use ($conferenceRoom, $participant): bool {
+            return $event->conferenceRoom->is($conferenceRoom)
+                && $event->participant->is($participant)
+                && $event->action === 'unblocked'
+                && $event->source === 'screen';
+        });
+    }
+
+    public function test_blocked_participant_cannot_start_screen_sharing(): void
+    {
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+            'metadata' => [
+                'screen_share' => [
+                    'blocked_by_host' => true,
+                ],
+            ],
+        ]);
+        $this->touchPresenceHeartbeat($hostParticipant);
+        $this->touchPresenceHeartbeat($participant);
+        $this->fakeConferenceControlForParticipants($conferenceRoom, 1, $participant);
+
+        Sanctum::actingAs($participantUser);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$participant->public_id}/screen-share-start",
+        )->assertUnprocessable()
+            ->assertJsonValidationErrors('participant');
+    }
+
+    public function test_participant_can_start_and_stop_screen_sharing_when_not_blocked(): void
+    {
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+        $this->touchPresenceHeartbeat($hostParticipant);
+        $this->touchPresenceHeartbeat($participant);
+        $this->fakeConferenceControlForParticipants($conferenceRoom, 2, $participant);
+
+        Event::fake([ConferenceRoomScreenShareUpdated::class]);
+        Sanctum::actingAs($participantUser);
+
+        $startResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$participant->public_id}/screen-share-start",
+        );
+
+        $startResponse->assertOk()
+            ->assertJsonPath('data.screen_share.is_sharing', true)
+            ->assertJsonPath('data.screen_share.blocked_by_host', false);
+
+        Event::assertDispatched(ConferenceRoomScreenShareUpdated::class, function (ConferenceRoomScreenShareUpdated $event) use ($conferenceRoom, $participant): bool {
+            return $event->conferenceRoom->is($conferenceRoom)
+                && $event->participant->is($participant)
+                && $event->action === 'started'
+                && $event->source === 'screen';
+        });
+
+        $participant->refresh();
+
+        $this->assertTrue((bool) data_get($participant->metadata, 'screen_share.is_sharing'));
+
+        $stopResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$participant->public_id}/screen-share-stop",
+        );
+
+        $stopResponse->assertOk()
+            ->assertJsonPath('data.screen_share.is_sharing', false);
+
+        Event::assertDispatched(ConferenceRoomScreenShareUpdated::class, function (ConferenceRoomScreenShareUpdated $event) use ($conferenceRoom, $participant): bool {
+            return $event->conferenceRoom->is($conferenceRoom)
+                && $event->participant->is($participant)
+                && $event->action === 'stopped'
+                && $event->source === 'screen';
+        });
+    }
+
+    public function test_participant_cannot_start_screen_sharing_when_another_participant_is_already_sharing(): void
+    {
+        $host = User::factory()->create();
+        $firstUser = User::factory()->create();
+        $secondUser = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($firstUser)->create();
+        OrganizationMembership::factory()->for($organization)->for($secondUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $firstParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($firstUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => 'First Presenter',
+            'email' => $firstUser->email,
+            'joined_at' => now()->subMinute(),
+            'metadata' => [
+                'screen_share' => [
+                    'is_sharing' => true,
+                    'active' => true,
+                    'started_at' => now()->subMinute()->toIso8601String(),
+                ],
+            ],
+        ]);
+        $secondParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($secondUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => 'Second Presenter',
+            'email' => $secondUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+        $this->touchPresenceHeartbeat($hostParticipant);
+        $this->touchPresenceHeartbeat($firstParticipant);
+        $this->touchPresenceHeartbeat($secondParticipant);
+        $this->fakeConferenceControlForParticipants($conferenceRoom, 2, $firstParticipant, $secondParticipant);
+
+        Sanctum::actingAs($firstUser);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$firstParticipant->public_id}/screen-share-start",
+        )->assertOk();
+
+        Sanctum::actingAs($secondUser);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/participants/{$secondParticipant->public_id}/screen-share-start",
+        )->assertStatus(409)
+            ->assertJsonPath('message', 'Another participant is already sharing their screen.')
+            ->assertJsonPath('error_code', 'screen_share_already_active');
+    }
+
+    public function test_participant_can_raise_hand_and_send_emoji_reaction(): void
+    {
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+        $organization = Organization::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+        $this->touchPresenceHeartbeat($hostParticipant);
+        $this->touchPresenceHeartbeat($participant);
+        Sanctum::actingAs($participantUser);
+
+        $handRaiseResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/reactions",
+            [
+                'reaction_type' => 'raise_hand',
+            ],
+        );
+
+        $handRaiseResponse->assertOk()
+            ->assertJsonPath('data.current_user_participant.hand_raised', true);
+
+        $participant->refresh();
+
+        $this->assertTrue((bool) data_get($participant->metadata, 'reactions.hand.raised'));
+
+        $emojiResponse = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/reactions",
+            [
+                'reaction_type' => 'party_popper',
+                'expires_in_seconds' => 45,
+            ],
+        );
+
+        $emojiResponse->assertOk()
+            ->assertJsonCount(1, 'data.reactions')
+            ->assertJsonPath('data.reactions.0.reaction_type', 'party_popper');
+
+        $this->assertSame(1, ConferenceRoomReaction::query()->count());
+    }
+
+    private function touchPresenceHeartbeat(ConferenceRoomParticipant $participant): void
+    {
+        app(ConferenceRoomParticipantPresenceService::class)->touchHeartbeat($participant, now());
+    }
+
+    /**
+     * @param  array<int, ConferenceRoomParticipant>  $participants
+     */
+    private function fakeConferenceControlForParticipants(
+        ConferenceRoom $conferenceRoom,
+        int $listMembersCalls,
+        ConferenceRoomParticipant ...$participants,
+    ): void {
+        $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+
+        $gateway->shouldReceive('listMembers')
+            ->times($listMembersCalls)
+            ->with($conferenceRoom->sip_number)
+            ->andReturn($this->conferenceMembersForParticipants(...$participants));
+
+        $gateway->shouldReceive('kickMember')->zeroOrMoreTimes();
+        $gateway->shouldReceive('muteMember')->zeroOrMoreTimes();
+        $gateway->shouldReceive('unmuteMember')->zeroOrMoreTimes();
+        $gateway->shouldReceive('videoMuteMember')->zeroOrMoreTimes();
+        $gateway->shouldReceive('videoUnmuteMember')->zeroOrMoreTimes();
+        $gateway->shouldReceive('startRecording')->zeroOrMoreTimes();
+        $gateway->shouldReceive('stopRecording')->zeroOrMoreTimes();
+
+        $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
+    }
+
+    /**
+     * @return array<int, array{member_id: string, caller_number: null, caller_name: string, uuid: null}>
+     */
+    private function conferenceMembersForParticipants(ConferenceRoomParticipant ...$participants): array
+    {
+        return array_map(
+            static function (ConferenceRoomParticipant $participant, int $index): array {
+                return [
+                    'member_id' => (string) ($index + 1),
+                    'caller_number' => null,
+                    'caller_name' => (string) $participant->display_name,
+                    'uuid' => null,
+                ];
+            },
+            $participants,
+            array_keys($participants),
+        );
     }
 }

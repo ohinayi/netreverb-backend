@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\CallLogController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRecordingController;
+use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
 use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\ExtensionController;
@@ -52,6 +53,12 @@ Route::prefix('v1')->group(function (): void {
                 ->name('conference-rooms.join-by-invite');
             Route::post('conference-rooms/leave-by-invite', [ConferenceRoomController::class, 'leaveByInvite'])
                 ->name('conference-rooms.leave-by-invite');
+            Route::get('conference-rooms/{conferenceRoom}/chat', [ConferenceRoomChatController::class, 'show'])
+                ->name('conference-rooms.chat.show');
+            Route::get('conference-rooms/{conferenceRoom}/chat/stream', [ConferenceRoomChatController::class, 'stream'])
+                ->name('conference-rooms.chat.stream');
+            Route::post('conference-rooms/{conferenceRoom}/chat/messages', [ConferenceRoomChatController::class, 'store'])
+                ->name('conference-rooms.chat.messages.store');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
             Route::get('people/search', [FriendshipController::class, 'search']);
@@ -143,9 +150,37 @@ Route::prefix('v1')->group(function (): void {
                     [ConferenceRoomController::class, 'videoOnParticipant'],
                 )->name('organizations.conference-rooms.participants.video-on');
                 Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/screen-share-start',
+                    [ConferenceRoomController::class, 'startScreenShare'],
+                )->name('organizations.conference-rooms.participants.screen-share-start');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/screen-share-stop',
+                    [ConferenceRoomController::class, 'stopScreenShare'],
+                )->name('organizations.conference-rooms.participants.screen-share-stop');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/screen-share-off',
+                    [ConferenceRoomController::class, 'screenShareOffParticipant'],
+                )->name('organizations.conference-rooms.participants.screen-share-off');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/screen-share-on',
+                    [ConferenceRoomController::class, 'screenShareOnParticipant'],
+                )->name('organizations.conference-rooms.participants.screen-share-on');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/reactions',
+                    [ConferenceRoomController::class, 'react'],
+                )->name('organizations.conference-rooms.reactions.store');
+                Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/leave',
                     [ConferenceRoomController::class, 'leave'],
                 )->name('organizations.conference-rooms.leave');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/presence/heartbeat',
+                    [ConferenceRoomController::class, 'heartbeat'],
+                )->name('organizations.conference-rooms.presence.heartbeat');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/presence/disconnect',
+                    [ConferenceRoomController::class, 'disconnect'],
+                )->name('organizations.conference-rooms.presence.disconnect');
                 Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/end',
                     [ConferenceRoomController::class, 'end'],

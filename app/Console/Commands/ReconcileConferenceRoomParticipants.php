@@ -8,6 +8,7 @@ use App\Enums\ConferenceParticipantStatus;
 use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use App\Services\Telephony\ConferenceLiveMemberResolver;
 use Illuminate\Console\Command;
 
@@ -21,6 +22,7 @@ class ReconcileConferenceRoomParticipants extends Command
         FreeSwitchConferenceGateway $freeSwitchConferenceGateway,
         ConferenceLiveMemberResolver $conferenceLiveMemberResolver,
         UpdateConferenceRoomParticipantPresence $updateConferenceRoomParticipantPresence,
+        ConferenceRoomParticipantPresenceService $participantPresenceService,
     ): int {
         $threshold = now()->subSeconds((int) config('telephony.conference_participants.stale_after_seconds', 90));
         $missesBeforeLeave = max(1, (int) config('telephony.conference_participants.missed_reconciliations_before_leave', 2));
@@ -58,6 +60,8 @@ class ReconcileConferenceRoomParticipants extends Command
                                 ],
                             ],
                         );
+
+                        $participantPresenceService->touchHeartbeat($participant);
                     }
 
                     continue;
@@ -79,6 +83,8 @@ class ReconcileConferenceRoomParticipants extends Command
                         ],
                     );
 
+                    $participantPresenceService->touchHeartbeat($participant);
+
                     continue;
                 }
 
@@ -94,6 +100,8 @@ class ReconcileConferenceRoomParticipants extends Command
                         ],
                     ],
                 );
+
+                $participantPresenceService->clearHeartbeat($participant);
 
                 $updatedCount++;
             }

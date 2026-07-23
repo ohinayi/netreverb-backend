@@ -3,6 +3,7 @@
 namespace App\Actions\ConferenceRooms;
 
 use App\Enums\ConferenceParticipantStatus;
+use App\Events\ConferenceRoomParticipantPresenceUpdated;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
@@ -29,6 +30,9 @@ class UpdateConferenceRoomParticipantPresence
                 ->lockForUpdate()
                 ->findOrFail($participant->id);
 
+            $previousStatus = $participant->status;
+            $previousMetadata = $participant->metadata ?? [];
+
             $participant->forceFill([
                 'status' => $status,
                 'left_at' => $leftAt,
@@ -42,6 +46,19 @@ class UpdateConferenceRoomParticipantPresence
             $shouldStopRecording = ! $conferenceRoom->participants()
                 ->where('status', ConferenceParticipantStatus::Joined->value)
                 ->exists();
+
+            if ($previousStatus !== $status || $previousMetadata !== ($participant->metadata ?? [])) {
+                event(new ConferenceRoomParticipantPresenceUpdated([
+                    'conference_room_public_id' => $participant->conferenceRoom->public_id,
+                    'participant_public_id' => $participant->public_id,
+                    'display_name' => $participant->display_name,
+                    'status' => $status->value,
+                    'last_seen_at' => data_get($metadata, 'presence.last_seen_at'),
+                    'left_at' => $leftAt?->format(DATE_ATOM),
+                    'disconnected_at' => data_get($metadata, 'presence.disconnected_at'),
+                    'reason' => data_get($metadata, 'presence.transition_reason'),
+                ]));
+            }
 
             return $participant->load(['user', 'conferenceRoom']);
         }, attempts: 3);

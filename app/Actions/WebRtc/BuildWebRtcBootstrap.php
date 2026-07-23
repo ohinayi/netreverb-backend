@@ -108,6 +108,17 @@ class BuildWebRtcBootstrap
                     'conference_video_max_chunk_size_kb' => (int) config('telephony.webrtc.recording.conference_video_max_chunk_size_kb', 8192),
                 ],
             ],
+            'conference' => [
+                'chat' => [
+                    'websocket_url' => (string) config('conference.chat.websocket_url'),
+                    'stream_url' => (string) config('conference.chat.stream_url'),
+                    'history_limit' => (int) config('conference.chat.history_limit', 50),
+                    'rate_limit' => [
+                        'max_messages' => (int) config('conference.chat.rate_limit_max_messages', 10),
+                        'decay_seconds' => (int) config('conference.chat.rate_limit_decay_seconds', 10),
+                    ],
+                ],
+            ],
             'expires_at' => $expiresAt,
         ];
     }

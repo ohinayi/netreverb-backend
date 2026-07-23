@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Enums\CallStatus;
 use App\Enums\ConferenceParticipantStatus;
+use App\Events\ConferenceRoomParticipantPresenceUpdated;
 use App\Models\CallLog;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
@@ -13,7 +14,9 @@ use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -652,6 +655,130 @@ class ConferenceRoomParticipantPresenceTest extends TestCase
             ->assertJson([
                 'message' => 'Conference control unavailable.',
                 'error_code' => 'conference_control_unavailable',
+            ]);
+    }
+
+    public function test_participant_heartbeat_endpoint_refreshes_in_memory_presence(): void
+    {
+        $organization = Organization::factory()->create();
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+
+        Sanctum::actingAs($participantUser);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/presence/heartbeat")
+            ->assertOk()
+            ->assertJsonPath('data.public_id', $participant->public_id)
+            ->assertJsonPath('data.presence.is_alive', true)
+            ->assertJsonPath('data.presence.is_stale', false)
+            ->assertJsonPath('data.presence.heartbeat_interval_seconds', 15)
+            ->assertJsonPath('data.presence.timeout_seconds', 40);
+    }
+
+    public function test_disconnect_endpoint_marks_participant_disconnected_and_broadcasts_state_change(): void
+    {
+        $organization = Organization::factory()->create();
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+
+        Event::fake([ConferenceRoomParticipantPresenceUpdated::class]);
+        Sanctum::actingAs($participantUser);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}/presence/disconnect",
+            ['reason' => 'network_loss'],
+        )->assertOk()
+            ->assertJsonPath('data.current_user_participant.status', ConferenceParticipantStatus::Disconnected->value)
+            ->assertJsonPath('data.current_user_participant.presence.is_alive', false);
+
+        Event::assertDispatched(ConferenceRoomParticipantPresenceUpdated::class, function (ConferenceRoomParticipantPresenceUpdated $event) use ($conferenceRoom, $participant): bool {
+            return $event->payload['conference_room_public_id'] === $conferenceRoom->public_id
+                && $event->payload['participant_public_id'] === $participant->public_id
+                && $event->payload['status'] === ConferenceParticipantStatus::Disconnected->value;
+        });
+
+        $participant->refresh();
+
+        $this->assertSame(ConferenceParticipantStatus::Disconnected, $participant->status);
+        $this->assertNotNull($participant->left_at);
+    }
+
+    public function test_room_show_reconciles_stale_heartbeat_before_serializing_participants(): void
+    {
+        $organization = Organization::factory()->create();
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $hostParticipant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($host)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $host->name,
+            'email' => $host->email,
+            'joined_at' => now()->subMinutes(2),
+        ]);
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinute(),
+        ]);
+
+        $presenceService = app(ConferenceRoomParticipantPresenceService::class);
+        $presenceService->touchHeartbeat($hostParticipant, now());
+        $presenceService->touchHeartbeat($participant, now()->subMinutes(2));
+
+        Sanctum::actingAs($host);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/conference-rooms/{$conferenceRoom->public_id}")
+            ->assertOk()
+            ->assertJsonPath('data.presence.heartbeat_interval_seconds', 15)
+            ->assertJsonPath('data.presence.timeout_seconds', 40)
+            ->assertJsonPath('data.presence.heartbeat_url', route('organizations.conference-rooms.presence.heartbeat', [$organization, $conferenceRoom]))
+            ->assertJsonPath('data.presence.disconnect_url', route('organizations.conference-rooms.presence.disconnect', [$organization, $conferenceRoom]))
+            ->assertJsonFragment([
+                'public_id' => $hostParticipant->public_id,
+                'status' => ConferenceParticipantStatus::Joined->value,
+            ])
+            ->assertJsonFragment([
+                'public_id' => $participant->public_id,
+                'status' => ConferenceParticipantStatus::Disconnected->value,
             ]);
     }
 

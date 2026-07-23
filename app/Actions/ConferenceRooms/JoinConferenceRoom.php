@@ -7,6 +7,7 @@ use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +17,7 @@ class JoinConferenceRoom
     public function __construct(
         private ConferenceRecordingManager $recordingManager,
         private TouchConferenceRoomExpiry $touchConferenceRoomExpiry,
+        private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
     /**
@@ -62,6 +64,7 @@ class JoinConferenceRoom
             return $participant->load('user');
         }, attempts: 3);
 
+        $this->participantPresenceService->touchHeartbeat($participant);
         $this->recordingManager->start($conferenceRoom);
 
         return $participant;

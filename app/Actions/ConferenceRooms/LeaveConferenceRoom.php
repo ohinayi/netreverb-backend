@@ -7,6 +7,7 @@ use App\Enums\ConferenceParticipantStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use App\Services\Telephony\ConferenceLiveMemberResolver;
 use App\Support\ConferenceControl;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +18,7 @@ class LeaveConferenceRoom
         private UpdateConferenceRoomParticipantPresence $updateConferenceRoomParticipantPresence,
         private ConferenceLiveMemberResolver $conferenceLiveMemberResolver,
         private FreeSwitchConferenceGateway $freeSwitchConferenceGateway,
+        private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
     public function execute(ConferenceRoom $conferenceRoom, User $user): void
@@ -73,5 +75,7 @@ class LeaveConferenceRoom
                 'left_via_api_at' => now()->toIso8601String(),
             ],
         );
+
+        $this->participantPresenceService->clearHeartbeat($participant);
     }
 }

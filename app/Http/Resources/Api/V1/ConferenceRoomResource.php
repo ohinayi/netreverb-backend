@@ -26,8 +26,9 @@ class ConferenceRoomResource extends JsonResource
             'waiting_room_required' => $this->whenHas('waiting_room_required'),
             'title' => $this->title,
             'status' => $this->status?->value ?? $this->status,
-            'expires_at' => $this->expires_at,
-            'ended_at' => $this->ended_at,
+            'starts_at' => $this->loadedAttribute('starts_at'),
+            'expires_at' => $this->loadedAttribute('expires_at'),
+            'ended_at' => $this->loadedAttribute('ended_at'),
             'created_at' => $this->created_at,
             'host' => $this->whenLoaded('hostUser', fn (): ?array => $this->hostUser === null ? null : [
                 'public_id' => $this->hostUser->public_id,
@@ -41,6 +42,20 @@ class ConferenceRoomResource extends JsonResource
             ]),
             'participant_count' => $this->whenCounted('participants'),
             'participants' => ConferenceRoomParticipantResource::collection($this->whenLoaded('participants')),
+            'reactions' => ConferenceRoomReactionResource::collection($this->whenLoaded('reactions')),
+            'presence' => [
+                'heartbeat_interval_seconds' => (int) config('conference.presence.heartbeat_interval_seconds', 15),
+                'timeout_seconds' => (int) config('conference.presence.timeout_seconds', 40),
+                'heartbeat_url' => route('organizations.conference-rooms.presence.heartbeat', [$this->organization, $this]),
+                'disconnect_url' => route('organizations.conference-rooms.presence.disconnect', [$this->organization, $this]),
+            ],
+            'chat' => [
+                'channel_name' => 'private-conference.chat.'.$this->public_id,
+                'websocket_url' => str_replace('{conferenceRoom}', $this->public_id, (string) config('conference.chat.websocket_url')),
+                'stream_url' => route('conference-rooms.chat.stream', $this),
+                'messages_url' => route('conference-rooms.chat.messages.store', $this),
+                'bootstrap_url' => route('conference-rooms.chat.show', $this),
+            ],
             'current_user_participant' => $this->whenLoaded(
                 'currentUserParticipant',
                 fn (): ?ConferenceRoomParticipantResource => $this->currentUserParticipant === null
@@ -49,5 +64,12 @@ class ConferenceRoomResource extends JsonResource
             ),
             'passcode_required' => $this->passcode_hash !== null,
         ];
+    }
+
+    private function loadedAttribute(string $attribute): mixed
+    {
+        return array_key_exists($attribute, $this->resource->getAttributes())
+            ? $this->resource->getAttribute($attribute)
+            : null;
     }
 }

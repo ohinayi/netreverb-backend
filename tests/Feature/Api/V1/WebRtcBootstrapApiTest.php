@@ -26,6 +26,7 @@ class WebRtcBootstrapApiTest extends TestCase
     public function test_assigned_user_receives_sip_and_short_lived_turn_credentials(): void
     {
         Carbon::setTestNow('2026-06-20 12:00:00');
+        $appUrl = rtrim((string) config('app.url'), '/');
         config()->set([
             'telephony.turn.secret' => 'test-turn-shared-secret',
             'telephony.turn.ttl' => 600,
@@ -149,6 +150,17 @@ class WebRtcBootstrapApiTest extends TestCase
                         'conference_video_container' => 'mp4',
                         'conference_video_chunk_duration_ms' => 4000,
                         'conference_video_max_chunk_size_kb' => 8192,
+                    ],
+                ],
+                'conference' => [
+                    'chat' => [
+                        'websocket_url' => $appUrl.'/api/v1/conference-rooms/{conferenceRoom}/chat',
+                        'stream_url' => $appUrl.'/api/v1/conference-rooms/{conferenceRoom}/chat/stream',
+                        'history_limit' => 50,
+                        'rate_limit' => [
+                            'max_messages' => 10,
+                            'decay_seconds' => 10,
+                        ],
                     ],
                 ],
                 'expires_at' => $expiresAt,

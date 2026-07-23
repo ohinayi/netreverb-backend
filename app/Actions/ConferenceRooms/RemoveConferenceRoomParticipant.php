@@ -7,6 +7,7 @@ use App\Enums\ConferenceParticipantStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
+use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use App\Services\Telephony\ConferenceLiveMemberResolver;
 use App\Support\ConferenceControl;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +18,7 @@ class RemoveConferenceRoomParticipant
         private ConferenceLiveMemberResolver $conferenceLiveMemberResolver,
         private FreeSwitchConferenceGateway $freeSwitchConferenceGateway,
         private UpdateConferenceRoomParticipantPresence $updateConferenceRoomParticipantPresence,
+        private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
     public function execute(
@@ -49,7 +51,7 @@ class RemoveConferenceRoomParticipant
             }
         }
 
-        return $this->updateConferenceRoomParticipantPresence->execute(
+        $updatedParticipant = $this->updateConferenceRoomParticipantPresence->execute(
             $participant,
             ConferenceParticipantStatus::Removed,
             now(),
@@ -58,5 +60,9 @@ class RemoveConferenceRoomParticipant
                 'removed_by_user_id' => $moderator->public_id,
             ],
         );
+
+        $this->participantPresenceService->clearHeartbeat($participant);
+
+        return $updatedParticipant;
     }
 }
