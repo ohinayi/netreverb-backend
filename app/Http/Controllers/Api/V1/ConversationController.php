@@ -24,7 +24,7 @@ class ConversationController extends Controller
     {
         $conversations = Conversation::query()
             ->whereHas('participants', fn ($query) => $query->where('user_id', $request->user()->id))
-            ->with(['community', 'participants.user'])
+            ->with(['community', 'participants.user', 'lastMessage.senderUser'])
             ->withCount('participants')
             ->latest('last_message_at')
             ->paginate(20);
@@ -51,7 +51,8 @@ class ConversationController extends Controller
             ]);
         }
 
-        if ($kind === ConversationKind::Community) {
+        $community = null;
+        if ($kind === ConversationKind::Community && $request->has('community_public_id') && $request->filled('community_public_id')) {
             $community = Community::query()
                 ->where('public_id', $request->string('community_public_id')->toString())
                 ->firstOrFail();
@@ -69,8 +70,6 @@ class ConversationController extends Controller
                     'community_public_id' => 'You are not a member of this community.',
                 ]);
             }
-        } else {
-            $community = null;
         }
 
         $directKey = $kind === ConversationKind::Direct
