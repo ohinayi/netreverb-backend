@@ -150,6 +150,10 @@ Route::prefix('v1')->group(function (): void {
                     [ConferenceRoomController::class, 'videoOnParticipant'],
                 )->name('organizations.conference-rooms.participants.video-on');
                 Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/camera-state',
+                    [ConferenceRoomController::class, 'updateCameraState'],
+                )->name('organizations.conference-rooms.participants.camera-state');
+                Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/participants/{participant}/screen-share-start',
                     [ConferenceRoomController::class, 'startScreenShare'],
                 )->name('organizations.conference-rooms.participants.screen-share-start');

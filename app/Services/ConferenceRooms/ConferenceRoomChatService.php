@@ -145,6 +145,7 @@ class ConferenceRoomChatService
             ->with('user')
             ->where('conference_room_id', $conferenceRoom->id)
             ->where('user_id', $user->id)
+            ->primary()
             ->latest('id')
             ->first();
     }

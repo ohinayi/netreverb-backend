@@ -60,6 +60,7 @@ class ConferenceRoomPolicy
         return ConferenceRoomParticipant::query()
             ->where('conference_room_id', $conferenceRoom->id)
             ->where('user_id', $user->id)
+            ->primary()
             ->where('status', ConferenceParticipantStatus::Joined->value)
             ->exists();
     }

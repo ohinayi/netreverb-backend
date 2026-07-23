@@ -4,6 +4,7 @@ return [
     'presence' => [
         'heartbeat_interval_seconds' => (int) env('CONFERENCE_PRESENCE_HEARTBEAT_INTERVAL_SECONDS', 15),
         'timeout_seconds' => (int) env('CONFERENCE_PRESENCE_TIMEOUT_SECONDS', 40),
+        'missed_reconciliations_before_disconnect' => (int) env('CONFERENCE_PRESENCE_MISSED_RECONCILIATIONS_BEFORE_DISCONNECT', 2),
     ],
     'chat' => [
         'websocket_url' => env('CONFERENCE_CHAT_WEBSOCKET_URL', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/api/v1/conference-rooms/{conferenceRoom}/chat'),

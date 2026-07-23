@@ -737,8 +737,14 @@ class ConferenceRoomParticipantPresenceTest extends TestCase
         $this->assertNotNull($participant->left_at);
     }
 
-    public function test_room_show_reconciles_stale_heartbeat_before_serializing_participants(): void
+    public function test_room_show_does_not_inline_reconcile_stale_heartbeats(): void
     {
+        // Presence reconciliation now runs exclusively on the scheduled
+        // `conference-rooms:reconcile-presence` command (see
+        // test_scheduled_reconciliation_disconnects_stale_participant_after_grace_period
+        // below), not inline on every room-state request. Running it inline on every
+        // 2.5s poll from every connected client caused row-lock contention with
+        // screen-share updates and made the whole roster flicker/disappear.
         $organization = Organization::factory()->create();
         $host = User::factory()->create();
         $participantUser = User::factory()->create();
@@ -778,8 +784,39 @@ class ConferenceRoomParticipantPresenceTest extends TestCase
             ])
             ->assertJsonFragment([
                 'public_id' => $participant->public_id,
-                'status' => ConferenceParticipantStatus::Disconnected->value,
+                'status' => ConferenceParticipantStatus::Joined->value,
             ]);
+
+        $this->assertSame(ConferenceParticipantStatus::Joined, $participant->fresh()->status);
+    }
+
+    public function test_scheduled_reconciliation_disconnects_stale_participant_after_grace_period(): void
+    {
+        $organization = Organization::factory()->create();
+        $host = User::factory()->create();
+        $participantUser = User::factory()->create();
+
+        OrganizationMembership::factory()->admin()->for($organization)->for($host)->create();
+        OrganizationMembership::factory()->for($organization)->for($participantUser)->create();
+
+        $conferenceRoom = ConferenceRoom::factory()->for($organization)->for($host, 'hostUser')->create();
+        $participant = ConferenceRoomParticipant::factory()->for($conferenceRoom)->for($participantUser)->create([
+            'status' => ConferenceParticipantStatus::Joined,
+            'display_name' => $participantUser->name,
+            'email' => $participantUser->email,
+            'joined_at' => now()->subMinutes(5),
+        ]);
+
+        $presenceService = app(ConferenceRoomParticipantPresenceService::class);
+        $presenceService->touchHeartbeat($participant, now()->subMinutes(5));
+
+        // First scheduled pass: stale, but within the grace window - stays Joined.
+        $this->artisan('conference-rooms:reconcile-presence')->assertExitCode(0);
+        $this->assertSame(ConferenceParticipantStatus::Joined, $participant->fresh()->status);
+
+        // Second consecutive stale pass crosses the default grace threshold (2) - Disconnected.
+        $this->artisan('conference-rooms:reconcile-presence')->assertExitCode(0);
+        $this->assertSame(ConferenceParticipantStatus::Disconnected, $participant->fresh()->status);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api\V1;
 
 use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
+use App\Services\Telephony\ConferenceLiveMemberResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -37,8 +38,22 @@ class ConferenceRoomParticipantResource extends JsonResource
                 'blocked_by_host' => (bool) data_get($screenShare, 'blocked_by_host', false),
                 'blocked_at' => data_get($screenShare, 'blocked_at'),
             ],
+            'screen_share_leg' => $this->whenLoaded(
+                'screenShareParticipant',
+                fn (): ?array => $this->screenShareParticipant === null ? null : [
+                    'public_id' => $this->screenShareParticipant->public_id,
+                    'display_name' => $this->screenShareParticipant->display_name,
+                    'sip_number' => $this->conferenceRoom?->sip_number,
+                    'caller_name_suffix' => ConferenceLiveMemberResolver::SCREEN_SHARE_CALLER_NAME_SUFFIX,
+                ],
+            ),
             'hand_raised' => (bool) data_get($this->metadata, 'reactions.hand.raised', false),
             'hand_raised_at' => data_get($this->metadata, 'reactions.hand.raised_at'),
+            // Self-reported camera state (distinct from moderation.video_muted_by_host,
+            // which is host-imposed). Defaults to true for participants who haven't
+            // reported a state yet, so older/never-updated sessions still render live
+            // video rather than being assumed camera-off.
+            'camera_enabled' => (bool) data_get($this->metadata, 'camera.enabled', true),
             'invited_at' => $this->invited_at,
             'joined_at' => $this->joined_at,
             'left_at' => $this->left_at,

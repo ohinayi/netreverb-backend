@@ -13,9 +13,9 @@ use App\Actions\ConferenceRooms\PublishConferenceRoomReaction;
 use App\Actions\ConferenceRooms\RemoveConferenceRoomParticipant;
 use App\Actions\ConferenceRooms\RequestConferenceRoomEntry;
 use App\Actions\ConferenceRooms\TouchConferenceRoomExpiry;
+use App\Actions\ConferenceRooms\UpdateConferenceRoomParticipantCameraState;
 use App\Actions\ConferenceRooms\UpdateConferenceRoomParticipantScreenShare;
 use App\Enums\ConferenceParticipantStatus;
-use App\Enums\ConferenceRoomStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\InviteConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\JoinConferenceRoomByInviteRequest;
@@ -25,6 +25,7 @@ use App\Http\Requests\Api\V1\ModerateConferenceRoomParticipantRequest;
 use App\Http\Requests\Api\V1\ResolveConferenceRoomInviteRequest;
 use App\Http\Requests\Api\V1\StoreConferenceRoomReactionRequest;
 use App\Http\Requests\Api\V1\StoreConferenceRoomRequest;
+use App\Http\Requests\Api\V1\UpdateConferenceRoomParticipantCameraStateRequest;
 use App\Http\Resources\Api\V1\ConferenceRoomParticipantResource;
 use App\Http\Resources\Api\V1\ConferenceRoomResource;
 use App\Models\ConferenceRoom;
@@ -53,6 +54,7 @@ class ConferenceRoomController extends Controller
         private ModerateConferenceRoomParticipant $moderateConferenceRoomParticipant,
         private ModerateConferenceRoomParticipantMedia $moderateConferenceRoomParticipantMedia,
         private UpdateConferenceRoomParticipantScreenShare $updateConferenceRoomParticipantScreenShare,
+        private UpdateConferenceRoomParticipantCameraState $updateConferenceRoomParticipantCameraState,
         private PublishConferenceRoomReaction $publishConferenceRoomReaction,
         private RemoveConferenceRoomParticipant $removeConferenceRoomParticipant,
         private TouchConferenceRoomExpiry $touchConferenceRoomExpiry,
@@ -65,8 +67,8 @@ class ConferenceRoomController extends Controller
 
         $conferenceRooms = $organization->conferenceRooms()
             ->select('conference_rooms.*')
-            ->with(['organization', 'hostUser', 'endedByUser', 'participants.user'])
-            ->withCount('participants')
+            ->with(['organization', 'hostUser', 'endedByUser', 'primaryParticipants.user'])
+            ->withCount('primaryParticipants')
             ->latest()
             ->paginate(25);
 
@@ -95,7 +97,7 @@ class ConferenceRoomController extends Controller
             ],
         );
 
-        return ConferenceRoomResource::make($conferenceRoom->loadCount('participants'))
+        return ConferenceRoomResource::make($conferenceRoom->loadCount('primaryParticipants'))
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
     }
@@ -474,6 +476,25 @@ class ConferenceRoomController extends Controller
         );
     }
 
+    public function updateCameraState(
+        UpdateConferenceRoomParticipantCameraStateRequest $request,
+        Organization $organization,
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+    ): JsonResource {
+        Gate::authorize('resolveInvite', $conferenceRoom);
+        $this->ensureParticipantBelongsToRoom($conferenceRoom, $participant, null);
+        $this->ensureParticipantBelongsToCurrentUser($participant, $request->user());
+
+        return ConferenceRoomParticipantResource::make(
+            $this->updateConferenceRoomParticipantCameraState->execute(
+                $conferenceRoom,
+                $participant,
+                $request->boolean('enabled'),
+            ),
+        );
+    }
+
     public function startScreenShare(
         Request $request,
         Organization $organization,
@@ -542,7 +563,7 @@ class ConferenceRoomController extends Controller
         $this->inviteConferenceRoomParticipant->execute($conferenceRoom, $request->validated());
 
         return ConferenceRoomResource::make(
-            $conferenceRoom->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])->loadCount('participants'),
+            $conferenceRoom->fresh(['organization', 'hostUser', 'endedByUser', 'primaryParticipants.user'])->loadCount('primaryParticipants'),
         );
     }
 
@@ -556,7 +577,7 @@ class ConferenceRoomController extends Controller
         $this->leaveConferenceRoom->execute($conferenceRoom, $request->user());
 
         return ConferenceRoomResource::make(
-            $conferenceRoom->fresh(['organization', 'hostUser', 'endedByUser', 'participants.user'])->loadCount('participants'),
+            $conferenceRoom->fresh(['organization', 'hostUser', 'endedByUser', 'primaryParticipants.user'])->loadCount('primaryParticipants'),
         );
     }
 
@@ -569,8 +590,8 @@ class ConferenceRoomController extends Controller
 
         return ConferenceRoomResource::make(
             $this->endConferenceRoom->execute($conferenceRoom, $request->user())
-                ->load(['organization', 'hostUser', 'endedByUser', 'participants.user'])
-                ->loadCount('participants'),
+                ->load(['organization', 'hostUser', 'endedByUser', 'primaryParticipants.user'])
+                ->loadCount('primaryParticipants'),
         );
     }
 
@@ -596,6 +617,7 @@ class ConferenceRoomController extends Controller
     ): ConferenceRoom {
         $participant ??= $conferenceRoom->participants()
             ->with('user')
+            ->primary()
             ->where('user_id', $user->id)
             ->latest('id')
             ->first();
@@ -616,8 +638,6 @@ class ConferenceRoomController extends Controller
         ConferenceRoom $conferenceRoom,
         bool $includeParticipants = true,
     ): ConferenceRoom {
-        $this->reconcileConferenceRoomPresence($conferenceRoom);
-
         $relations = [
             'organization',
             'hostUser',
@@ -625,7 +645,8 @@ class ConferenceRoomController extends Controller
         ];
 
         if ($includeParticipants) {
-            $relations[] = 'participants.user';
+            $relations[] = 'primaryParticipants.user';
+            $relations[] = 'primaryParticipants.screenShareParticipant';
             $relations['reactions'] = function ($query): void {
                 $query->where(function ($query): void {
                     $query->whereNull('expires_at')
@@ -634,29 +655,25 @@ class ConferenceRoomController extends Controller
             };
         }
 
-        $conferenceRoom->load($relations)->loadCount('participants');
+        $conferenceRoom->load($relations)->loadCount('primaryParticipants');
+
+        if ($includeParticipants) {
+            foreach ($conferenceRoom->primaryParticipants as $primaryParticipant) {
+                $primaryParticipant->setRelation('conferenceRoom', $conferenceRoom);
+            }
+        }
 
         if ($conferenceRoom->relationLoaded('currentUserParticipant')
             && $conferenceRoom->getRelation('currentUserParticipant') instanceof ConferenceRoomParticipant
         ) {
-            $conferenceRoom->setRelation(
-                'currentUserParticipant',
-                ConferenceRoomParticipant::query()
-                    ->with('user')
-                    ->find($conferenceRoom->getRelation('currentUserParticipant')->id),
-            );
+            $currentUserParticipant = ConferenceRoomParticipant::query()
+                ->with(['user', 'screenShareParticipant'])
+                ->find($conferenceRoom->getRelation('currentUserParticipant')->id);
+            $currentUserParticipant?->setRelation('conferenceRoom', $conferenceRoom);
+            $conferenceRoom->setRelation('currentUserParticipant', $currentUserParticipant);
         }
 
         return $conferenceRoom;
-    }
-
-    private function reconcileConferenceRoomPresence(ConferenceRoom $conferenceRoom): void
-    {
-        if ($conferenceRoom->status !== ConferenceRoomStatus::Active) {
-            return;
-        }
-
-        $this->participantPresenceService->reconcileRoom($conferenceRoom);
     }
 
     private function canJoinDirectly(
@@ -673,6 +690,7 @@ class ConferenceRoomController extends Controller
         }
 
         $participant ??= $conferenceRoom->participants()
+            ->primary()
             ->where('user_id', $user->id)
             ->latest('id')
             ->first();
@@ -725,6 +743,7 @@ class ConferenceRoomController extends Controller
     ): ConferenceRoomParticipant {
         $participant = $conferenceRoom->participants()
             ->with('user')
+            ->primary()
             ->where('user_id', $user->id)
             ->latest('id')
             ->first();

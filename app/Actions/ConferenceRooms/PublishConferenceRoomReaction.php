@@ -21,6 +21,7 @@ class PublishConferenceRoomReaction
             $participant = ConferenceRoomParticipant::query()
                 ->where('conference_room_id', $conferenceRoom->id)
                 ->where('user_id', $actor->id)
+                ->primary()
                 ->lockForUpdate()
                 ->first();
 

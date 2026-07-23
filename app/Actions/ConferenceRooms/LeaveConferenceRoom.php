@@ -26,6 +26,7 @@ class LeaveConferenceRoom
         $participant = ConferenceRoomParticipant::query()
             ->with(['user.extensions.dialableNumber', 'conferenceRoom'])
             ->where('conference_room_id', $conferenceRoom->id)
+            ->primary()
             ->whereBelongsTo($user)
             ->first();
 
@@ -33,6 +34,47 @@ class LeaveConferenceRoom
             return;
         }
 
+        $this->kickLiveMembers($conferenceRoom, $participant, $user, 'leave');
+
+        $this->updateConferenceRoomParticipantPresence->execute(
+            $participant,
+            ConferenceParticipantStatus::Left,
+            now(),
+            [
+                'left_via_api_at' => now()->toIso8601String(),
+            ],
+        );
+
+        $this->participantPresenceService->clearHeartbeat($participant);
+
+        $screenShareParticipant = ConferenceRoomParticipant::query()
+            ->with(['user.extensions.dialableNumber', 'conferenceRoom'])
+            ->where('parent_participant_id', $participant->id)
+            ->where('status', ConferenceParticipantStatus::Joined)
+            ->first();
+
+        if ($screenShareParticipant !== null) {
+            $this->kickLiveMembers($conferenceRoom, $screenShareParticipant, $user, 'leave');
+
+            $this->updateConferenceRoomParticipantPresence->execute(
+                $screenShareParticipant,
+                ConferenceParticipantStatus::Left,
+                now(),
+                [
+                    'left_via_api_at' => now()->toIso8601String(),
+                ],
+            );
+
+            $this->participantPresenceService->clearHeartbeat($screenShareParticipant);
+        }
+    }
+
+    private function kickLiveMembers(
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+        User $user,
+        string $action,
+    ): void {
         try {
             $liveMembers = ConferenceControl::rescue(
                 fn (): array => $this->conferenceLiveMemberResolver->findMembersForParticipant($participant),
@@ -44,7 +86,7 @@ class LeaveConferenceRoom
                     'participant_id' => $participant->public_id,
                     'user_id' => $user->public_id,
                     'sip_number' => $conferenceRoom->sip_number,
-                    'action' => 'leave',
+                    'action' => $action,
                 ]);
             }
 
@@ -62,20 +104,9 @@ class LeaveConferenceRoom
                 'participant_id' => $participant->public_id,
                 'user_id' => $user->public_id,
                 'sip_number' => $conferenceRoom->sip_number,
-                'action' => 'leave',
+                'action' => $action,
                 'error' => $throwable->getMessage(),
             ]);
         }
-
-        $this->updateConferenceRoomParticipantPresence->execute(
-            $participant,
-            ConferenceParticipantStatus::Left,
-            now(),
-            [
-                'left_via_api_at' => now()->toIso8601String(),
-            ],
-        );
-
-        $this->participantPresenceService->clearHeartbeat($participant);
     }
 }

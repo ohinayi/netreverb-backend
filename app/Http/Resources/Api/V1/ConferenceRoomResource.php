@@ -40,8 +40,8 @@ class ConferenceRoomResource extends JsonResource
                 'name' => $this->endedByUser->name,
                 'email' => $this->endedByUser->email,
             ]),
-            'participant_count' => $this->whenCounted('participants'),
-            'participants' => ConferenceRoomParticipantResource::collection($this->whenLoaded('participants')),
+            'participant_count' => $this->whenCounted('primaryParticipants'),
+            'participants' => ConferenceRoomParticipantResource::collection($this->whenLoaded('primaryParticipants')),
             'reactions' => ConferenceRoomReactionResource::collection($this->whenLoaded('reactions')),
             'presence' => [
                 'heartbeat_interval_seconds' => (int) config('conference.presence.heartbeat_interval_seconds', 15),

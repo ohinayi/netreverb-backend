@@ -3,9 +3,9 @@
 namespace App\Actions\ConferenceRooms;
 
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
+use App\Enums\ConferenceParticipantKind;
 use App\Enums\ConferenceParticipantStatus;
 use App\Events\ConferenceRoomScreenShareUpdated;
-use App\Exceptions\ConferenceControlUnavailableException;
 use App\Exceptions\ConferenceScreenShareAlreadyActiveException;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Telephony\ConferenceLiveMemberResolver;
 use App\Support\ConferenceControl;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class UpdateConferenceRoomParticipantScreenShare
@@ -25,9 +26,13 @@ class UpdateConferenceRoomParticipantScreenShare
     public function start(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant, User $actor): ConferenceRoomParticipant
     {
         $before = $this->screenShareState($participant->metadata['screen_share'] ?? null);
-        $participant = $this->apply($conferenceRoom, $participant, $actor, 'start');
+        $participant = $this->applyMetadata($conferenceRoom, $participant, $actor, 'start');
+        $changed = $this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before;
 
-        if ($this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before) {
+        $screenShareParticipant = $this->joinScreenShareLeg($conferenceRoom, $participant, $actor);
+        $participant->setRelation('screenShareParticipant', $screenShareParticipant);
+
+        if ($changed) {
             ConferenceRoomScreenShareUpdated::dispatch($conferenceRoom, $participant, 'started', 'screen');
         }
 
@@ -37,9 +42,13 @@ class UpdateConferenceRoomParticipantScreenShare
     public function stop(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant, User $actor): ConferenceRoomParticipant
     {
         $before = $this->screenShareState($participant->metadata['screen_share'] ?? null);
-        $participant = $this->apply($conferenceRoom, $participant, $actor, 'stop');
+        $participant = $this->applyMetadata($conferenceRoom, $participant, $actor, 'stop');
+        $changed = $this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before;
 
-        if ($this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before) {
+        $this->leaveScreenShareLeg($conferenceRoom, $participant);
+        $participant->setRelation('screenShareParticipant', null);
+
+        if ($changed) {
             ConferenceRoomScreenShareUpdated::dispatch($conferenceRoom, $participant, 'stopped', 'screen');
         }
 
@@ -49,9 +58,13 @@ class UpdateConferenceRoomParticipantScreenShare
     public function forceStop(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant, User $actor): ConferenceRoomParticipant
     {
         $before = $this->screenShareState($participant->metadata['screen_share'] ?? null);
-        $participant = $this->apply($conferenceRoom, $participant, $actor, 'force_stop');
+        $participant = $this->applyMetadata($conferenceRoom, $participant, $actor, 'force_stop');
+        $changed = $this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before;
 
-        if ($this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before) {
+        $this->leaveScreenShareLeg($conferenceRoom, $participant);
+        $participant->setRelation('screenShareParticipant', null);
+
+        if ($changed) {
             ConferenceRoomScreenShareUpdated::dispatch($conferenceRoom, $participant, 'blocked', 'screen');
         }
 
@@ -61,7 +74,7 @@ class UpdateConferenceRoomParticipantScreenShare
     public function allow(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant, User $actor): ConferenceRoomParticipant
     {
         $before = $this->screenShareState($participant->metadata['screen_share'] ?? null);
-        $participant = $this->apply($conferenceRoom, $participant, $actor, 'allow');
+        $participant = $this->applyMetadata($conferenceRoom, $participant, $actor, 'allow');
 
         if ($this->screenShareState($participant->metadata['screen_share'] ?? null) !== $before) {
             ConferenceRoomScreenShareUpdated::dispatch($conferenceRoom, $participant, 'unblocked', 'screen');
@@ -70,45 +83,25 @@ class UpdateConferenceRoomParticipantScreenShare
         return $participant;
     }
 
-    private function apply(
+    /**
+     * Apply the requested screen-share metadata transition on the primary participant row.
+     * This only ever touches the primary participant's `metadata->screen_share` state; it
+     * never talks to FreeSWITCH — screen media now lives entirely on its own leg (see
+     * joinScreenShareLeg()/leaveScreenShareLeg()), so the camera leg is never muted/unmuted.
+     */
+    private function applyMetadata(
         ConferenceRoom $conferenceRoom,
         ConferenceRoomParticipant $participant,
         User $actor,
         string $mode,
     ): ConferenceRoomParticipant {
-        $participant = $participant->loadMissing('user.extensions.dialableNumber', 'conferenceRoom');
-        $roomMembers = ConferenceControl::rescue(
-            fn (): array => $this->conferenceLiveMemberResolver->membersForRoom($conferenceRoom),
-        );
-        $liveMember = $this->conferenceLiveMemberResolver->findMemberForParticipant($participant, $roomMembers);
-
-        if ($liveMember === null) {
-            throw ValidationException::withMessages([
-                'participant' => 'This participant is not actively connected to the conference.',
-            ]);
-        }
-
-        if (trim((string) ($liveMember['member_id'] ?? '')) === '') {
-            throw ConferenceControlUnavailableException::conferenceRosterUnavailable();
-        }
-
-        return DB::transaction(function () use (
-            $conferenceRoom,
-            $participant,
-            $actor,
-            $mode,
-            $liveMember,
-        ): ConferenceRoomParticipant {
-            $roomParticipants = ConferenceRoomParticipant::query()
-                ->where('conference_room_id', $conferenceRoom->id)
-                ->lockForUpdate()
-                ->get();
-
+        return DB::transaction(function () use ($conferenceRoom, $participant, $actor, $mode): ConferenceRoomParticipant {
             $participant = ConferenceRoomParticipant::query()
                 ->where('conference_room_id', $conferenceRoom->id)
                 ->whereKey($participant->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            $participant->setRelation('conferenceRoom', $conferenceRoom);
 
             $screenShare = is_array($participant->metadata['screen_share'] ?? null)
                 ? $participant->metadata['screen_share']
@@ -116,15 +109,6 @@ class UpdateConferenceRoomParticipantScreenShare
 
             $isSharing = (bool) data_get($screenShare, 'is_sharing', data_get($screenShare, 'active', false));
             $isBlockedByHost = (bool) data_get($screenShare, 'blocked_by_host', false);
-            $otherParticipantIsSharing = ConferenceRoomParticipant::query()
-                ->where('conference_room_id', $conferenceRoom->id)
-                ->whereKeyNot($participant->id)
-                ->where('status', ConferenceParticipantStatus::Joined->value)
-                ->where(function ($query): void {
-                    $query->where('metadata->screen_share->is_sharing', true)
-                        ->orWhere('metadata->screen_share->active', true);
-                })
-                ->exists();
 
             if ($mode === 'start') {
                 if ($isBlockedByHost) {
@@ -132,6 +116,17 @@ class UpdateConferenceRoomParticipantScreenShare
                         'participant' => 'Screen sharing was stopped by the host.',
                     ]);
                 }
+
+                $otherParticipantIsSharing = ConferenceRoomParticipant::query()
+                    ->where('conference_room_id', $conferenceRoom->id)
+                    ->primary()
+                    ->whereKeyNot($participant->id)
+                    ->where('status', ConferenceParticipantStatus::Joined->value)
+                    ->where(function ($query): void {
+                        $query->where('metadata->screen_share->is_sharing', true)
+                            ->orWhere('metadata->screen_share->active', true);
+                    })
+                    ->exists();
 
                 if ($otherParticipantIsSharing) {
                     throw ConferenceScreenShareAlreadyActiveException::alreadyActive();
@@ -145,8 +140,6 @@ class UpdateConferenceRoomParticipantScreenShare
             if ($mode === 'stop' && ! $isSharing) {
                 return $participant->load('user');
             }
-
-            $this->applyBridgeCommand($conferenceRoom->sip_number, (string) $liveMember['member_id'], $mode, $isSharing);
 
             $now = now()->toIso8601String();
             $screenShare['is_sharing'] = $mode === 'start';
@@ -164,8 +157,6 @@ class UpdateConferenceRoomParticipantScreenShare
             }
 
             if ($mode === 'stop' || $mode === 'force_stop') {
-                $screenShare['is_sharing'] = false;
-                $screenShare['active'] = false;
                 $screenShare['stopped_at'] = $isSharing ? $now : data_get($screenShare, 'stopped_at');
                 $screenShare['stopped_by_user_id'] = $actor->public_id;
             }
@@ -194,40 +185,84 @@ class UpdateConferenceRoomParticipantScreenShare
         }, attempts: 3);
     }
 
-    private function applyBridgeCommand(
-        string $conferenceName,
-        string $memberId,
-        string $mode,
-        bool $isSharing,
-    ): void {
-        if ($mode === 'start') {
-            ConferenceControl::rescue(
-                fn (): null => $this->freeSwitchConferenceGateway->videoUnmuteMember($conferenceName, $memberId),
-            );
+    /**
+     * Create (or reuse) the dedicated screen-share leg row for this participant. The frontend
+     * uses the returned row's identity + the room's sip_number to place a second, independent
+     * SIP/WebRTC INVITE carrying only the screen capture — the primary (camera/mic) leg is
+     * never touched.
+     */
+    private function joinScreenShareLeg(
+        ConferenceRoom $conferenceRoom,
+        ConferenceRoomParticipant $participant,
+        User $actor,
+    ): ConferenceRoomParticipant {
+        $screenShareParticipant = ConferenceRoomParticipant::query()->firstOrNew([
+            'conference_room_id' => $conferenceRoom->id,
+            'user_id' => $participant->user_id,
+            'kind' => ConferenceParticipantKind::ScreenShare,
+        ]);
 
-            return;
-        }
+        $screenShareParticipant->fill([
+            'parent_participant_id' => $participant->id,
+            'display_name' => $participant->display_name.ConferenceLiveMemberResolver::SCREEN_SHARE_CALLER_NAME_SUFFIX,
+            'email' => $participant->email,
+            'role' => $participant->role,
+            'status' => ConferenceParticipantStatus::Joined,
+            'invited_at' => $screenShareParticipant->exists ? $screenShareParticipant->invited_at : now(),
+            'joined_at' => now(),
+            'left_at' => null,
+        ]);
+        $screenShareParticipant->save();
 
-        if (($mode === 'stop' || $mode === 'force_stop') && ! $isSharing) {
-            return;
-        }
-
-        if ($mode === 'allow') {
-            return;
-        }
-
-        ConferenceControl::rescue(
-            fn (): null => $this->freeSwitchConferenceGateway->videoMuteMember($conferenceName, $memberId),
-        );
+        return $screenShareParticipant->fresh();
     }
 
-    private function isSharing(mixed $screenShareMetadata): bool
+    /**
+     * Tear down the screen-share leg: kick its live FreeSWITCH member (if connected), release
+     * any pinned video floor, and mark the leg row Left. Tolerant of the leg not having
+     * connected yet (e.g. the client called stop before the second INVITE was answered).
+     */
+    private function leaveScreenShareLeg(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant): void
     {
-        if (! is_array($screenShareMetadata)) {
-            return false;
+        $screenShareParticipant = ConferenceRoomParticipant::query()
+            ->with('user.extensions.dialableNumber', 'conferenceRoom')
+            ->where('parent_participant_id', $participant->id)
+            ->where('status', ConferenceParticipantStatus::Joined)
+            ->first();
+
+        if ($screenShareParticipant === null) {
+            return;
         }
 
-        return (bool) data_get($screenShareMetadata, 'is_sharing', data_get($screenShareMetadata, 'active', false));
+        try {
+            $liveMembers = ConferenceControl::rescue(
+                fn (): array => $this->conferenceLiveMemberResolver->findMembersForParticipant($screenShareParticipant),
+            );
+
+            foreach ($liveMembers as $liveMember) {
+                ConferenceControl::rescue(
+                    fn (): null => $this->freeSwitchConferenceGateway->kickMember(
+                        $conferenceRoom->sip_number,
+                        $liveMember['member_id'],
+                    ),
+                );
+            }
+
+            ConferenceControl::rescue(
+                fn (): null => $this->freeSwitchConferenceGateway->releaseVideoFloor($conferenceRoom->sip_number),
+            );
+        } catch (\Throwable $throwable) {
+            Log::warning('Failed to tear down conference screen-share leg on FreeSWITCH.', [
+                'conference_room_id' => $conferenceRoom->public_id,
+                'screen_share_participant_id' => $screenShareParticipant->public_id,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
+
+        $screenShareParticipant->forceFill([
+            'status' => ConferenceParticipantStatus::Left,
+            'left_at' => now(),
+        ])->save();
     }
 
     /**

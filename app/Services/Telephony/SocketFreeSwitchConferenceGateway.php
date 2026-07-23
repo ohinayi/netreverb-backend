@@ -57,6 +57,16 @@ class SocketFreeSwitchConferenceGateway implements FreeSwitchConferenceGateway
         $this->runConferenceCommand($conferenceName, sprintf('unvmute %s quiet', $memberId));
     }
 
+    public function pinVideoFloor(string $conferenceName, string $memberId): void
+    {
+        $this->runConferenceCommand($conferenceName, sprintf('vid-floor %s force', $memberId));
+    }
+
+    public function releaseVideoFloor(string $conferenceName): void
+    {
+        $this->runConferenceCommand($conferenceName, 'clear-vid-floor');
+    }
+
     public function startRecording(string $conferenceName, string $absolutePath): void
     {
         $this->runConferenceCommand($conferenceName, sprintf('recording start %s', $absolutePath));

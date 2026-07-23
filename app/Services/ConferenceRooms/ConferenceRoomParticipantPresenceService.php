@@ -83,6 +83,7 @@ class ConferenceRoomParticipantPresenceService
     public function reconcileRoom(ConferenceRoom $conferenceRoom): int
     {
         $updatedCount = 0;
+        $missesBeforeDisconnect = max(1, (int) config('conference.presence.missed_reconciliations_before_disconnect', 2));
 
         $participants = $conferenceRoom->participants()
             ->with('user')
@@ -91,6 +92,28 @@ class ConferenceRoomParticipantPresenceService
 
         foreach ($participants as $participant) {
             if (! $this->isStale($participant)) {
+                if ($this->reconcileMissCount($participant) > 0) {
+                    $this->updateConferenceRoomParticipantPresence->execute(
+                        $participant,
+                        ConferenceParticipantStatus::Joined,
+                        null,
+                        ['heartbeat_reconcile' => ['miss_count' => 0]],
+                    );
+                }
+
+                continue;
+            }
+
+            $nextMissCount = $this->reconcileMissCount($participant) + 1;
+
+            if ($nextMissCount < $missesBeforeDisconnect) {
+                $this->updateConferenceRoomParticipantPresence->execute(
+                    $participant,
+                    ConferenceParticipantStatus::Joined,
+                    null,
+                    ['heartbeat_reconcile' => ['miss_count' => $nextMissCount]],
+                );
+
                 continue;
             }
 
@@ -99,6 +122,13 @@ class ConferenceRoomParticipantPresenceService
         }
 
         return $updatedCount;
+    }
+
+    private function reconcileMissCount(ConferenceRoomParticipant $participant): int
+    {
+        $metadata = is_array($participant->metadata) ? $participant->metadata : [];
+
+        return max(0, (int) data_get($metadata, 'heartbeat_reconcile.miss_count', 0));
     }
 
     public function markLeft(ConferenceRoomParticipant $participant, string $reason): ConferenceRoomParticipant

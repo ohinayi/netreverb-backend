@@ -27,29 +27,7 @@ class RemoveConferenceRoomParticipant
         User $moderator,
     ): ConferenceRoomParticipant {
         $participant = $participant->loadMissing('user.extensions.dialableNumber', 'conferenceRoom');
-        $liveMembers = ConferenceControl::rescue(
-            fn (): array => $this->conferenceLiveMemberResolver->findMembersForParticipant($participant),
-        );
-
-        if ($liveMembers !== []) {
-            try {
-                foreach ($liveMembers as $liveMember) {
-                    ConferenceControl::rescue(
-                        fn (): null => $this->freeSwitchConferenceGateway->kickMember(
-                            $conferenceRoom->sip_number,
-                            $liveMember['member_id'],
-                        ),
-                    );
-                }
-            } catch (\Throwable $throwable) {
-                Log::warning('Failed to kick conference participant from FreeSWITCH.', [
-                    'conference_room_id' => $conferenceRoom->public_id,
-                    'participant_id' => $participant->public_id,
-                    'member_ids' => array_column($liveMembers, 'member_id'),
-                    'error' => $throwable->getMessage(),
-                ]);
-            }
-        }
+        $this->kickLiveMembers($conferenceRoom, $participant);
 
         $updatedParticipant = $this->updateConferenceRoomParticipantPresence->execute(
             $participant,
@@ -63,6 +41,57 @@ class RemoveConferenceRoomParticipant
 
         $this->participantPresenceService->clearHeartbeat($participant);
 
+        $screenShareParticipant = ConferenceRoomParticipant::query()
+            ->with('user.extensions.dialableNumber', 'conferenceRoom')
+            ->where('parent_participant_id', $participant->id)
+            ->where('status', ConferenceParticipantStatus::Joined)
+            ->first();
+
+        if ($screenShareParticipant !== null) {
+            $this->kickLiveMembers($conferenceRoom, $screenShareParticipant);
+
+            $this->updateConferenceRoomParticipantPresence->execute(
+                $screenShareParticipant,
+                ConferenceParticipantStatus::Removed,
+                now(),
+                [
+                    'removed_at' => now()->toIso8601String(),
+                    'removed_by_user_id' => $moderator->public_id,
+                ],
+            );
+
+            $this->participantPresenceService->clearHeartbeat($screenShareParticipant);
+        }
+
         return $updatedParticipant;
+    }
+
+    private function kickLiveMembers(ConferenceRoom $conferenceRoom, ConferenceRoomParticipant $participant): void
+    {
+        $liveMembers = ConferenceControl::rescue(
+            fn (): array => $this->conferenceLiveMemberResolver->findMembersForParticipant($participant),
+        );
+
+        if ($liveMembers === []) {
+            return;
+        }
+
+        try {
+            foreach ($liveMembers as $liveMember) {
+                ConferenceControl::rescue(
+                    fn (): null => $this->freeSwitchConferenceGateway->kickMember(
+                        $conferenceRoom->sip_number,
+                        $liveMember['member_id'],
+                    ),
+                );
+            }
+        } catch (\Throwable $throwable) {
+            Log::warning('Failed to kick conference participant from FreeSWITCH.', [
+                'conference_room_id' => $conferenceRoom->public_id,
+                'participant_id' => $participant->public_id,
+                'member_ids' => array_column($liveMembers, 'member_id'),
+                'error' => $throwable->getMessage(),
+            ]);
+        }
     }
 }

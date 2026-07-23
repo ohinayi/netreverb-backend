@@ -2,6 +2,7 @@
 
 namespace App\Actions\ConferenceRooms;
 
+use App\Enums\ConferenceParticipantKind;
 use App\Enums\ConferenceParticipantStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
@@ -47,6 +48,7 @@ class JoinConferenceRoom
             $participant = ConferenceRoomParticipant::query()->firstOrNew([
                 'conference_room_id' => $conferenceRoom->id,
                 'user_id' => $user->id,
+                'kind' => ConferenceParticipantKind::Primary,
             ]);
 
             $participant->fill([

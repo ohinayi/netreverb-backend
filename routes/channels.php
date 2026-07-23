@@ -16,6 +16,7 @@ $authorizeConferenceRoomParticipant = function (User $user, ConferenceRoom $conf
     $participantExists = ConferenceRoomParticipant::query()
         ->where('conference_room_id', $conferenceRoom->id)
         ->where('user_id', $user->id)
+        ->primary()
         ->whereIn('status', [
             ConferenceParticipantStatus::Invited->value,
             ConferenceParticipantStatus::Waiting->value,
