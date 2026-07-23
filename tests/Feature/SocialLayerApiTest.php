@@ -29,7 +29,8 @@ class SocialLayerApiTest extends TestCase
 
         $this->getJson('/api/v1/people/search?q=Grace')
             ->assertOk()
-            ->assertJsonFragment(['name' => 'Grace Hopper']);
+            ->assertJsonPath('data.0.public_id', $receiver->public_id)
+            ->assertJsonPath('data.0.name', 'Grace Hopper');
 
         $response = $this->postJson('/api/v1/friendships', [
             'addressee_public_id' => $receiver->public_id,

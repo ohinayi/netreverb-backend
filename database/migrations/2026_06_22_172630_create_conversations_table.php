@@ -22,7 +22,6 @@ return new class extends Migration
             $table->timestamp('last_message_at')->nullable()->index();
             $table->timestamp('archived_at')->nullable()->index();
             $table->timestamps();
-
             $table->index(['community_id', 'kind']);
             $table->index(['created_by_user_id', 'kind']);
         });
