@@ -17,7 +17,7 @@ class OrganizationPolicy
 
     public function view(User $user, Organization $organization): bool
     {
-        return $this->activeMembership($user, $organization) !== null;
+        return $user->isSuperAdmin() || $this->activeMembership($user, $organization) !== null;
     }
 
     public function create(User $user): bool
@@ -28,6 +28,17 @@ class OrganizationPolicy
     public function update(User $user, Organization $organization): bool
     {
         return $this->canManage($user, $organization);
+    }
+
+    public function manageMembers(User $user, Organization $organization): bool
+    {
+        if ($user->isSuperAdmin()) return true;
+
+        return in_array(
+            $this->activeMembership($user, $organization)?->role,
+            [MembershipRole::Owner, MembershipRole::Admin, MembershipRole::DepartmentManager],
+            strict: true,
+        );
     }
 
     public function delete(User $user, Organization $organization): bool
@@ -47,6 +58,8 @@ class OrganizationPolicy
 
     private function canManage(User $user, Organization $organization): bool
     {
+        if ($user->isSuperAdmin()) return true;
+
         return in_array(
             $this->activeMembership($user, $organization)?->role,
             [MembershipRole::Owner, MembershipRole::Admin],

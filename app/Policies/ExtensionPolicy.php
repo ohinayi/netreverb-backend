@@ -61,9 +61,11 @@ class ExtensionPolicy
 
     private function canManage(User $user, Organization|int $organization): bool
     {
+        if ($user->isSuperAdmin()) return true;
+
         return in_array(
             $this->activeMembership($user, $organization)?->role,
-            [MembershipRole::Owner, MembershipRole::Admin],
+            [MembershipRole::Owner, MembershipRole::Admin, MembershipRole::TelephonyAdmin],
             strict: true,
         );
     }

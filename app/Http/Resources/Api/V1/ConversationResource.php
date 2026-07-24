@@ -19,6 +19,16 @@ class ConversationResource extends JsonResource
             'direct_key' => $this->direct_key,
             'last_message_at' => $this->last_message_at,
             'last_message' => new MessageResource($this->whenLoaded('lastMessage')),
+            'unread_count' => $this->when($request->user() !== null, function () use ($request): int {
+                $participant = $this->participants
+                    ->firstWhere('user_id', $request->user()->id);
+                $lastReadAt = $participant?->last_read_at ?? $participant?->joined_at;
+
+                return $this->messages()
+                    ->where('sender_user_id', '!=', $request->user()->id)
+                    ->when($lastReadAt, fn ($query) => $query->where('sent_at', '>', $lastReadAt))
+                    ->count();
+            }),
             'archived_at' => $this->archived_at,
             'community' => $this->whenLoaded('community', fn (): ?array => $this->community === null ? null : [
                 'public_id' => $this->community->public_id,

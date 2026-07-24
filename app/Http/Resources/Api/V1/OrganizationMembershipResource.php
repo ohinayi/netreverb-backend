@@ -12,6 +12,10 @@ class OrganizationMembershipResource extends JsonResource
     {
         return [
             'id' => $this->public_id,
+            'can_manage' => $request->user()?->isSuperAdmin()
+                || in_array($request->user()?->organizationMemberships()
+                    ->where('organization_id', $this->organization_id)
+                    ->value('role'), ['owner', 'admin', 'department_manager'], true),
             'role' => $this->role?->value ?? $this->role,
             'status' => $this->status?->value ?? $this->status,
             'joined_at' => $this->joined_at,

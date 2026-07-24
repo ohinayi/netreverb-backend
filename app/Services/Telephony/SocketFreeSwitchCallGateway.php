@@ -62,6 +62,23 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
         $this->assertSuccessfulResponse($command, $response);
     }
 
+    public function transfer(string $callUuid, string $destination): void
+    {
+        // Destination is validated by the HTTP request as a dialable number.
+        // Keeping it as an API argument (rather than dialplan interpolation)
+        // prevents a caller from injecting arbitrary FreeSWITCH commands.
+        $command = sprintf(
+            'uuid_transfer %s %s %s %s',
+            $callUuid,
+            $destination,
+            config('telephony.freeswitch.transfer_dialplan', 'XML'),
+            config('telephony.freeswitch.transfer_context', 'default'),
+        );
+
+        $response = $this->client->api($command);
+        $this->assertSuccessfulResponse($command, $response);
+    }
+
     private function buildRecordingCommand(
         string $action,
         string $callUuid,

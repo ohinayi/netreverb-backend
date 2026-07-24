@@ -11,4 +11,7 @@ interface FreeSwitchCallGateway
     public function startRecording(string $callUuid, string $absolutePath, CallRecordingProfile $profile): void;
 
     public function stopRecording(string $callUuid, string $absolutePath, CallRecordingProfile $profile): void;
+
+    /** Transfer an active FreeSWITCH channel to a dialplan destination. */
+    public function transfer(string $callUuid, string $destination): void;
 }

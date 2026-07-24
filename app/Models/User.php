@@ -20,6 +20,7 @@ use Laravel\Sanctum\HasApiTokens;
     'name',
     'email',
     'account_type',
+    'is_super_admin',
     'password',
     'country_code',
     'timezone',
@@ -41,6 +42,13 @@ class User extends Authenticatable implements MustVerifyEmailContract
     public function getRouteKeyName(): string
     {
         return 'public_id';
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        // Allows a rolling deployment where application code is released just
+        // before the database migration has been applied.
+        return (bool) ($this->attributes['is_super_admin'] ?? false);
     }
 
     public function organizationMemberships(): HasMany
@@ -115,6 +123,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
         return [
             'email_verified_at' => 'datetime',
             'account_type' => AccountType::class,
+            'is_super_admin' => 'boolean',
             'password' => 'hashed',
             'terms_accepted_at' => 'datetime',
             'last_login_at' => 'datetime',

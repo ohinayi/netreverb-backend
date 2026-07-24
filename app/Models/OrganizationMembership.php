@@ -27,6 +27,11 @@ class OrganizationMembership extends Model
         return ['public_id'];
     }
 
+    public function getRouteKeyName(): string
+    {
+        return 'public_id';
+    }
+
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);

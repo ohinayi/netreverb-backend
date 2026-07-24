@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'user_id',
     'role',
     'joined_at',
+    'last_read_at',
     'left_at',
     'muted_at',
 ])]
@@ -41,6 +42,7 @@ class ConversationParticipant extends Model
     {
         return [
             'joined_at' => 'datetime',
+            'last_read_at' => 'datetime',
             'left_at' => 'datetime',
             'muted_at' => 'datetime',
         ];

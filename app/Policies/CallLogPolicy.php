@@ -18,7 +18,7 @@ class CallLogPolicy
 
     public function viewAll(User $user, Organization $organization): bool
     {
-        return $this->canManage($user, $organization);
+        return $this->canViewAll($user, $organization);
     }
 
     public function view(User $user, CallLog $callLog): bool
@@ -27,7 +27,7 @@ class CallLogPolicy
             return false;
         }
 
-        if ($this->canManage($user, $callLog->organization_id)) {
+        if ($this->canViewAll($user, $callLog->organization_id)) {
             return true;
         }
 
@@ -63,6 +63,11 @@ class CallLogPolicy
         return $this->canManage($user, $callLog->organization_id);
     }
 
+    public function transfer(User $user, CallLog $callLog): bool
+    {
+        return $this->canManage($user, $callLog->organization_id);
+    }
+
     public function restore(User $user, CallLog $callLog): bool
     {
         return false;
@@ -75,9 +80,33 @@ class CallLogPolicy
 
     private function canManage(User $user, Organization|int $organization): bool
     {
+        if ($user->isSuperAdmin()) return true;
+
         return in_array(
             $this->activeMembership($user, $organization)?->role,
-            [MembershipRole::Owner, MembershipRole::Admin],
+            [
+                MembershipRole::Owner,
+                MembershipRole::Admin,
+                MembershipRole::TelephonyAdmin,
+                MembershipRole::Supervisor,
+            ],
+            strict: true,
+        );
+    }
+
+    private function canViewAll(User $user, Organization|int $organization): bool
+    {
+        if ($user->isSuperAdmin()) return true;
+
+        return in_array(
+            $this->activeMembership($user, $organization)?->role,
+            [
+                MembershipRole::Owner,
+                MembershipRole::Admin,
+                MembershipRole::TelephonyAdmin,
+                MembershipRole::Supervisor,
+                MembershipRole::Auditor,
+            ],
             strict: true,
         );
     }

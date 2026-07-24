@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
+use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\CallLogController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CommunityController;
@@ -19,6 +20,7 @@ use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
+use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
@@ -27,6 +29,10 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:5,1');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
+        ->middleware('throttle:5,1');
+    Route::post('auth/forgot-password', [PasswordResetController::class, 'store'])
+        ->middleware('throttle:3,1');
+    Route::post('auth/reset-password', [PasswordResetController::class, 'update'])
         ->middleware('throttle:5,1');
     Route::get('email/verify/{id}/{hash}', EmailVerificationController::class)
         ->middleware(['signed', 'throttle:6,1'])
@@ -45,6 +51,8 @@ Route::prefix('v1')->group(function (): void {
             ->name('verification.send');
 
         Route::middleware('verified')->group(function (): void {
+            Route::get('super-admin/analytics', SuperAdminAnalyticsController::class)
+                ->name('super-admin.analytics');
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');
@@ -87,8 +95,12 @@ Route::prefix('v1')->group(function (): void {
                     ->name('organizations.members.index');
                 Route::post('organizations/{organization}/members', [OrganizationController::class, 'inviteMember'])
                     ->name('organizations.members.invite');
+                Route::patch('organizations/{organization}/members/{membership}', [OrganizationController::class, 'updateMember'])
+                    ->name('organizations.members.update');
                 Route::apiResource('organizations.call-logs', CallLogController::class)
                     ->parameters(['call-logs' => 'callLog']);
+                Route::post('organizations/{organization}/call-logs/{callLog}/transfer', [CallLogController::class, 'transfer'])
+                    ->name('organizations.call-logs.transfer');
                 Route::post(
                     'organizations/{organization}/call-logs/{callLog}/recording/start',
                     [CallRecordingController::class, 'start'],

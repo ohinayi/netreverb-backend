@@ -16,6 +16,7 @@ class UserResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'account_type' => $this->account_type?->value ?? $this->account_type,
+            'is_super_admin' => $this->isSuperAdmin(),
             'email_verified' => $this->hasVerifiedEmail(),
             'country_code' => $this->country_code,
             'timezone' => $this->timezone,

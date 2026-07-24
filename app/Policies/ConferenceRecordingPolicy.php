@@ -48,9 +48,11 @@ class ConferenceRecordingPolicy
 
     private function canManage(User $user, int $organizationId): bool
     {
+        if ($user->isSuperAdmin()) return true;
+
         return in_array(
             $this->activeMembership($user, $organizationId)?->role,
-            [MembershipRole::Owner, MembershipRole::Admin],
+            [MembershipRole::Owner, MembershipRole::Admin, MembershipRole::TelephonyAdmin, MembershipRole::Supervisor],
             true,
         );
     }

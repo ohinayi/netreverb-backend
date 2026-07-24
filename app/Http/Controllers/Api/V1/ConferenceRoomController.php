@@ -61,16 +61,18 @@ class ConferenceRoomController extends Controller
         private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
-    public function index(Organization $organization): AnonymousResourceCollection
+    public function index(Request $request, Organization $organization): AnonymousResourceCollection
     {
         Gate::authorize('viewAny', [ConferenceRoom::class, $organization]);
+
+        $perPage = min(100, max(1, $request->integer('per_page', 10)));
 
         $conferenceRooms = $organization->conferenceRooms()
             ->select('conference_rooms.*')
             ->with(['organization', 'hostUser', 'endedByUser', 'primaryParticipants.user'])
             ->withCount('primaryParticipants')
             ->latest()
-            ->paginate(25);
+            ->paginate($perPage);
 
         return ConferenceRoomResource::collection($conferenceRooms);
     }

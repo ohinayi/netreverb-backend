@@ -14,6 +14,8 @@ use Illuminate\Support\Str;
 
 class AddOrganizationMember
 {
+    public function __construct(private SyncOrganizationMemberFriendships $syncFriendships) {}
+
     /**
      * @param  array{user_public_id?: ?string, email?: ?string, name?: ?string, department_public_id?: ?string, role?: ?string}  $attributes
      */
@@ -41,10 +43,15 @@ class AddOrganizationMember
                     'role' => isset($attributes['role'])
                         ? MembershipRole::from($attributes['role'])
                         : MembershipRole::Member,
-                    'status' => MembershipStatus::Invited,
-                    'joined_at' => null,
+                    // Organization admins control membership acceptance. The
+                    // invitee only needs to complete the secure password-reset
+                    // link before signing in to their assigned workspace.
+                    'status' => MembershipStatus::Active,
+                    'joined_at' => now(),
                 ],
             );
+
+            $this->syncFriendships->execute($organization, $user);
 
             return $membership;
         });

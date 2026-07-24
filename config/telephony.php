@@ -51,6 +51,8 @@ return [
         'event_socket_port' => (int) env('FREESWITCH_EVENT_SOCKET_PORT', env('FREESWITCH_PORT', 8021)),
         'event_socket_password' => env('FREESWITCH_EVENT_SOCKET_PASSWORD', env('FREESWITCH_PASSWORD', 'ClueCon')),
         'event_socket_timeout_seconds' => (int) env('FREESWITCH_EVENT_SOCKET_TIMEOUT_SECONDS', 5),
+        'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
+        'transfer_context' => env('FREESWITCH_TRANSFER_CONTEXT', 'default'),
     ],
     'turn' => [
         'secret' => env('TURN_SECRET'),

@@ -120,6 +120,11 @@ class ConversationController extends Controller
     {
         Gate::authorize('view', $conversation);
 
+        ConversationParticipant::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $request->user()->id)
+            ->update(['last_read_at' => now()]);
+
         return ConversationResource::make(
             $conversation->load(['community', 'participants.user', 'messages.senderUser'])->loadCount('participants'),
         );

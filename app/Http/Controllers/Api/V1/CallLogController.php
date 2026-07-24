@@ -7,12 +7,14 @@ use App\Enums\CallStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
 use App\Http\Requests\Api\V1\UpdateCallLogRequest;
+use App\Http\Requests\Api\V1\TransferCallRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Services\CallRecordings\CallRecordingManager;
 use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
+use App\Contracts\Telephony\FreeSwitchCallGateway;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,6 +30,7 @@ class CallLogController extends Controller
     public function __construct(
         private readonly FreeSwitchCallUuidSynchronizer $uuidSynchronizer,
         private readonly CallRecordingManager $recordingManager,
+        private readonly FreeSwitchCallGateway $callGateway,
     ) {}
 
     /**
@@ -91,6 +94,29 @@ class CallLogController extends Controller
         ]);
 
         return CallLogResource::collection($callLogs);
+    }
+
+    public function transfer(
+        TransferCallRequest $request,
+        Organization $organization,
+        CallLog $callLog,
+    ): CallLogResource {
+        Gate::authorize('transfer', $callLog);
+        abort_unless($callLog->organization_id === $organization->id, Response::HTTP_NOT_FOUND);
+
+        $callUuid = $callLog->freeswitch_uuid;
+        abort_if($callUuid === null || $callUuid === '', Response::HTTP_CONFLICT,
+            'This call is not connected to FreeSWITCH yet. Try again once it is active.');
+
+        $this->callGateway->transfer($callUuid, $request->string('destination')->toString());
+
+        Log::info('Active call transferred.', [
+            'call_log_id' => $callLog->public_id,
+            'organization_id' => $organization->public_id,
+            'destination' => $request->string('destination')->toString(),
+        ]);
+
+        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
     }
 
     /**
