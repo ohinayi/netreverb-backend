@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
 use App\Http\Controllers\Api\V1\ConversationController;
+use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\ExtensionController;
 use App\Http\Controllers\Api\V1\FriendshipController;
 use App\Http\Controllers\Api\V1\MessageController;
@@ -80,6 +81,12 @@ Route::prefix('v1')->group(function (): void {
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
+                Route::apiResource('organizations.departments', DepartmentController::class)
+                    ->only(['index', 'store', 'update']);
+                Route::get('organizations/{organization}/members', [OrganizationController::class, 'members'])
+                    ->name('organizations.members.index');
+                Route::post('organizations/{organization}/members', [OrganizationController::class, 'inviteMember'])
+                    ->name('organizations.members.invite');
                 Route::apiResource('organizations.call-logs', CallLogController::class)
                     ->parameters(['call-logs' => 'callLog']);
                 Route::post(

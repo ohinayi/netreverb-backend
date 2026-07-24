@@ -15,6 +15,7 @@ use App\Services\Telephony\DatabaseSipSubscriberGateway;
 use App\Services\Telephony\FreeSwitchEventSocketClient;
 use App\Services\Telephony\SocketFreeSwitchCallGateway;
 use App\Services\Telephony\SocketFreeSwitchConferenceGateway;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
@@ -73,6 +74,15 @@ class AppServiceProvider extends ServiceProvider
                 .'/auth/verify-email?'
                 .http_build_query(
                     ['verification_url' => $verificationUrl],
+                    encoding_type: PHP_QUERY_RFC3986,
+                );
+        });
+
+        ResetPassword::createUrlUsing(function (object $notifiable, string $token): string {
+            return rtrim(config('app.frontend_url'), '/')
+                .'/auth/reset-password?'
+                .http_build_query(
+                    ['token' => $token, 'email' => $notifiable->getEmailForPasswordReset()],
                     encoding_type: PHP_QUERY_RFC3986,
                 );
         });

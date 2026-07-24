@@ -1,58 +1,56 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# NetReverb
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel (PHP 8.4) + Vue 3 communications platform: SIP/WebRTC calling, HD video conferencing, direct and group messaging, and organization/telephony administration, built on FreeSWITCH.
 
-## About Laravel
+- **Backend**: this repo — Laravel 13, MySQL, FreeSWITCH ESL integration, Laravel Sanctum auth.
+- **Frontend**: `netreverb-frontend` (sibling repo) — Vue 3, TypeScript, Tailwind CSS v4, SIP.js, TanStack Query.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Done
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+**Calling & conferencing**
+- 1:1 and organization dial-pad audio/video calling over SIP.js, backed by per-user FreeSWITCH extensions.
+- Multi-party video conference rooms (`ConferenceRoom`), including host-controlled waiting room, admit/deny, mute/unmute, camera on/off with per-participant avatar fallback when a camera is off, raised-hand with auto-lower and a visual badge, and emoji reactions.
+- Screen sharing implemented as a dual SIP leg (primary camera leg + dedicated screen-share leg) so a presenter's own camera feed keeps working while they share — avoids the single-leg approach's video-replacement bugs. Host can revoke a participant's screen-share mid-meeting.
+- Conference presence reconciliation with a grace period, so flaky connections don't instantly evict participants, while genuinely dropped participants are still cleaned up.
+- In-conference text chat.
+- Conference invite links/codes, join-by-invite, and recordings.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+**Messaging**
+- Direct and group conversations (`Conversation.kind`: direct/group/community), with a member-picker dialog for starting new 1:1 or group chats.
+- Call icons in a conversation header route straight into placing a real audio/video call (resolves the other participant's SIP extension automatically) instead of a dead-end UI.
+- Group conversations can be escalated straight into a conference room, auto-inviting every group member.
 
-## Learning Laravel
+**Organizations & administration**
+- Multi-tenant organizations with membership roles (owner/admin/member) and status (invited/active/suspended).
+- Organization-scoped departments: create, list, update, and assign members to a department.
+- Add a member to an organization by existing account or by email — inviting by email auto-creates the account and emails a password-setup link.
+- Extensions, service numbers, and dialable numbers per organization; call logs with recording start/stop/upload/finalize.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+**Design**
+- Full visual redesign of the landing page, login/register, sidebar/nav, and messaging UI (Lumina Blue `#2563eb` brand, real light and dark themes, theme defaults to the OS preference).
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Pending / Roadmap
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+- **Call transfer** — blind/attended transfer between users and departments. Department infrastructure (this release) is the prerequisite; the live SIP transfer logic itself is not yet built.
+- **AI integration** — general AI-assisted features across calling and conferencing.
+- **Transcription** — real-time transcription of calls and conference sessions.
+- **Translation** — real-time translation on calls and in conferences.
+- **AI customer-service assistant** — an agent that can answer questions on a call, draft responses, and create orders on the caller's behalf.
+- **SIP trunk & DID numbers** — connecting a SIP trunk for real PSTN numbers, DID number assignment, and call management around it.
+- **Call audit log** — a dedicated audit trail of call activity beyond the existing `CallLog` record.
 
-## Agentic Development
+## Next phase
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Transcription is the natural next step: it's a direct prerequisite for both translation (translate the transcript) and the AI customer-service assistant (the assistant needs a text stream of the call to reason over), so building it first unblocks the largest share of the remaining roadmap. Call transfer is the next-highest-leverage item after that, since the department structure it needs already exists.
+
+## Local development
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+php artisan migrate
+composer run dev   # serves the app + queue worker + Vite watcher
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Run tests with `php artisan test --compact`. Format PHP with `vendor/bin/pint`.
 
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+See `CLAUDE.md` for the project's coding conventions (Laravel Boost guidelines).

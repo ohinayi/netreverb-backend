@@ -74,6 +74,11 @@ class Organization extends Model
         return $this->hasMany(ConferenceRoom::class);
     }
 
+    public function departments(): HasMany
+    {
+        return $this->hasMany(Department::class);
+    }
+
     public function dialableNumbers(): HasMany
     {
         return $this->hasMany(DialableNumber::class);

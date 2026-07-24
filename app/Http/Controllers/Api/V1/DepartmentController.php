@@ -1,0 +1,55 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\StoreDepartmentRequest;
+use App\Http\Requests\Api\V1\UpdateDepartmentRequest;
+use App\Http\Resources\Api\V1\DepartmentResource;
+use App\Models\Department;
+use App\Models\Organization;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
+
+class DepartmentController extends Controller
+{
+    public function index(Organization $organization): AnonymousResourceCollection
+    {
+        Gate::authorize('view', $organization);
+
+        return DepartmentResource::collection(
+            $organization->departments()->withCount('memberships')->orderBy('name')->get(),
+        );
+    }
+
+    public function store(StoreDepartmentRequest $request, Organization $organization): JsonResponse
+    {
+        Gate::authorize('update', $organization);
+
+        $department = $organization->departments()->create([
+            'name' => $request->string('name')->toString(),
+            'slug' => $request->filled('slug')
+                ? $request->string('slug')->toString()
+                : Str::slug($request->string('name')->toString()),
+            'description' => $request->input('description'),
+            'color' => $request->input('color'),
+        ]);
+
+        return DepartmentResource::make($department)->response()->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    public function update(
+        UpdateDepartmentRequest $request,
+        Organization $organization,
+        Department $department,
+    ): DepartmentResource {
+        Gate::authorize('update', $organization);
+
+        $department->update($request->validated());
+
+        return DepartmentResource::make($department->refresh());
+    }
+}

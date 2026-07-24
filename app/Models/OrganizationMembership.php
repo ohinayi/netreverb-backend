@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_id', 'user_id', 'invited_by', 'role', 'status', 'joined_at'])]
+#[Fillable(['organization_id', 'user_id', 'department_id', 'invited_by', 'role', 'status', 'joined_at'])]
 class OrganizationMembership extends Model
 {
     /** @use HasFactory<OrganizationMembershipFactory> */
@@ -40,6 +40,11 @@ class OrganizationMembership extends Model
     public function inviter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'invited_by');
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     protected function casts(): array

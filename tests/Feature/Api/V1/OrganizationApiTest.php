@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\V1;
 
 use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\MembershipRole;
+use App\Models\Department;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
@@ -108,5 +109,108 @@ class OrganizationApiTest extends TestCase
                 'audio_path' => '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
             ],
         ], $organization->settings);
+    }
+
+    public function test_admin_can_create_a_department_but_member_cannot(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        $member = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        OrganizationMembership::factory()->for($organization)->for($member)->create();
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/departments", [
+            'name' => 'Engineering',
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'Engineering')
+            ->assertJsonPath('data.slug', 'engineering');
+
+        $this->assertDatabaseHas('departments', [
+            'organization_id' => $organization->id,
+            'name' => 'Engineering',
+        ]);
+
+        Sanctum::actingAs($member);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/departments", [
+            'name' => 'Sales',
+        ])->assertForbidden();
+    }
+
+    public function test_admin_can_list_and_update_departments(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        $department = Department::factory()->for($organization)->create(['name' => 'Support']);
+
+        Sanctum::actingAs($admin);
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/departments")
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Support');
+
+        $this->patchJson(
+            "/api/v1/organizations/{$organization->public_id}/departments/{$department->public_id}",
+            ['name' => 'Customer Support'],
+        )->assertOk()->assertJsonPath('data.name', 'Customer Support');
+    }
+
+    public function test_admin_can_invite_an_existing_user_as_an_organization_member(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        $invitee = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/members", [
+            'user_public_id' => $invitee->public_id,
+        ])->assertCreated()
+            ->assertJsonPath('data.user.id', $invitee->public_id)
+            ->assertJsonPath('data.status', 'invited');
+
+        $this->assertDatabaseHas('organization_memberships', [
+            'organization_id' => $organization->id,
+            'user_id' => $invitee->id,
+            'status' => 'invited',
+        ]);
+    }
+
+    public function test_admin_can_invite_a_new_member_by_email_and_a_user_account_is_created(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        $department = Department::factory()->for($organization)->create();
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson("/api/v1/organizations/{$organization->public_id}/members", [
+            'email' => 'newhire@example.com',
+            'name' => 'New Hire',
+            'department_public_id' => $department->public_id,
+        ])->assertCreated();
+
+        $response->assertJsonPath('data.department.id', $department->public_id);
+
+        $user = User::query()->where('email', 'newhire@example.com')->sole();
+        $this->assertSame('New Hire', $user->name);
+
+        $this->assertDatabaseHas('organization_memberships', [
+            'organization_id' => $organization->id,
+            'user_id' => $user->id,
+            'department_id' => $department->id,
+        ]);
+    }
+
+    public function test_member_cannot_invite_organization_members(): void
+    {
+        $organization = Organization::factory()->create();
+        $member = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($member)->create();
+
+        Sanctum::actingAs($member);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/members", [
+            'email' => 'someone@example.com',
+        ])->assertForbidden();
     }
 }
