@@ -49,10 +49,16 @@ return [
     'freeswitch' => [
         'event_socket_host' => env('FREESWITCH_EVENT_SOCKET_HOST', env('FREESWITCH_HOST', '127.0.0.1')),
         'event_socket_port' => (int) env('FREESWITCH_EVENT_SOCKET_PORT', env('FREESWITCH_PORT', 8021)),
-        'event_socket_password' => env('FREESWITCH_EVENT_SOCKET_PASSWORD', env('FREESWITCH_PASSWORD', 'ClueCon')),
+        // Keep the long-standing FREESWITCH_PASSWORD setting authoritative.
+        // Some deployments still carry an old event-socket-specific value;
+        // that must not silently override the working FreeSWITCH credential.
+        'event_socket_password' => env('FREESWITCH_PASSWORD', env('FREESWITCH_EVENT_SOCKET_PASSWORD', 'ClueCon')),
         'event_socket_timeout_seconds' => (int) env('FREESWITCH_EVENT_SOCKET_TIMEOUT_SECONDS', 5),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
-        'transfer_context' => env('FREESWITCH_TRANSFER_CONTEXT', 'default'),
+        // Browser extensions are routed by the public dialplan.  Sending a
+        // blind transfer to `default` hits its catch-all/sleep rule instead
+        // of bridging the destination extension.
+        'transfer_context' => env('FREESWITCH_TRANSFER_CONTEXT', 'public'),
     ],
     'turn' => [
         'secret' => env('TURN_SECRET'),

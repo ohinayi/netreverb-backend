@@ -72,7 +72,7 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
             $callUuid,
             $destination,
             config('telephony.freeswitch.transfer_dialplan', 'XML'),
-            config('telephony.freeswitch.transfer_context', 'default'),
+            config('telephony.freeswitch.transfer_context', 'public'),
         );
 
         $response = $this->client->api($command);
