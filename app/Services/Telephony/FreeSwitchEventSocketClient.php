@@ -13,9 +13,9 @@ class FreeSwitchEventSocketClient
         private readonly int $timeoutSeconds,
     ) {}
 
-    public function api(string $command): string
+    public function api(string $command, ?int $timeoutSeconds = null): string
     {
-        $socket = $this->openSocket();
+        $socket = $this->openSocket($timeoutSeconds);
 
         try {
             $this->consumeBanner($socket);
@@ -99,13 +99,14 @@ class FreeSwitchEventSocketClient
     /**
      * @return resource
      */
-    private function openSocket()
+    private function openSocket(?int $timeoutSeconds = null)
     {
+        $timeout = $timeoutSeconds ?? $this->timeoutSeconds;
         $socket = @stream_socket_client(
             sprintf('tcp://%s:%d', $this->host, $this->port),
             $errno,
             $errstr,
-            $this->timeoutSeconds,
+            $timeout,
         );
 
         if ($socket === false) {
@@ -117,7 +118,7 @@ class FreeSwitchEventSocketClient
             ));
         }
 
-        stream_set_timeout($socket, $this->timeoutSeconds);
+        stream_set_timeout($socket, $timeout);
 
         return $socket;
     }

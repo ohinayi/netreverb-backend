@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
+use App\Enums\ExtensionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
 use App\Http\Requests\Api\V1\UpdateCallLogRequest;
 use App\Http\Requests\Api\V1\TransferCallRequest;
+use App\Exceptions\FreeSwitchTransferException;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Extension;
@@ -22,6 +24,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -108,7 +111,28 @@ class CallLogController extends Controller
         abort_if($callUuid === null || $callUuid === '', Response::HTTP_CONFLICT,
             'This call is not connected to FreeSWITCH yet. Try again once it is active.');
 
-        $this->callGateway->transfer($callUuid, $request->string('destination')->toString());
+        $destination = $request->string('destination')->toString();
+        $destinationExtension = Extension::query()
+            ->where('organization_id', $organization->id)
+            ->whereHas('dialableNumber', fn ($query) => $query->where('number', $destination))
+            ->first();
+
+        if ($destinationExtension === null || $destinationExtension->status !== ExtensionStatus::Active) {
+            throw ValidationException::withMessages([
+                'destination' => 'Safe transfer is currently available only to an active extension in this organization.',
+            ]);
+        }
+
+        try {
+            $this->callGateway->transfer(
+                $callUuid,
+                $destination,
+                $callLog->caller_number,
+                $destinationExtension->ring_timeout_seconds ?? 20,
+            );
+        } catch (FreeSwitchTransferException $exception) {
+            throw ValidationException::withMessages(['destination' => $exception->getMessage()]);
+        }
 
         Log::info('Active call transferred.', [
             'call_log_id' => $callLog->public_id,

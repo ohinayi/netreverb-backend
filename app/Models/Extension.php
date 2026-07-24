@@ -14,7 +14,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['organization_id', 'dialable_number_id', 'user_id', 'display_name', 'type', 'status'])]
+#[Fillable([
+    'organization_id', 'dialable_number_id', 'user_id', 'display_name', 'type', 'status',
+    'unavailable_action', 'fallback_extension_id', 'ring_timeout_seconds',
+])]
 class Extension extends Model
 {
     /** @use HasFactory<ExtensionFactory> */
@@ -63,6 +66,11 @@ class Extension extends Model
     public function provisioningEvents(): HasMany
     {
         return $this->hasMany(SipProvisioningEvent::class);
+    }
+
+    public function fallbackExtension(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'fallback_extension_id');
     }
 
     protected function casts(): array

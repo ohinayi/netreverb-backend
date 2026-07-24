@@ -23,6 +23,9 @@ class ExtensionResource extends JsonResource
             'type' => $this->type,
             'status' => $this->status,
             'user_id' => $this->user?->public_id,
+            'unavailable_action' => $this->unavailable_action,
+            'fallback_extension_id' => $this->fallbackExtension?->public_id,
+            'ring_timeout_seconds' => $this->ring_timeout_seconds,
             'provisioning' => $this->whenLoaded('provisioningState', fn (): array => [
                 'status' => $this->provisioningState->status,
                 'desired_revision' => $this->provisioningState->desired_revision,

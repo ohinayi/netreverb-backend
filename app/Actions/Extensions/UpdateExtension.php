@@ -21,7 +21,10 @@ class UpdateExtension
             $previousStatus = $lockedExtension->status;
 
             $lockedExtension->update([
-                ...Arr::only($attributes, ['display_name', 'type', 'status']),
+                ...Arr::only($attributes, [
+                    'display_name', 'type', 'status', 'unavailable_action',
+                    'fallback_extension_id', 'ring_timeout_seconds',
+                ]),
                 ...$this->assigneeAttributes($attributes),
             ]);
 
@@ -52,7 +55,7 @@ class UpdateExtension
             ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
         }
 
-        return $extension->refresh()->load(['dialableNumber', 'user', 'provisioningState']);
+        return $extension->refresh()->load(['dialableNumber', 'user', 'fallbackExtension', 'provisioningState']);
     }
 
     private function assigneeAttributes(array $attributes): array

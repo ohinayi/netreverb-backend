@@ -30,7 +30,7 @@ class ExtensionController extends Controller
         Gate::authorize('viewAny', [Extension::class, $organization]);
 
         $extensions = $organization->extensions()
-            ->with(['dialableNumber', 'user', 'provisioningState'])
+            ->with(['dialableNumber', 'user', 'fallbackExtension', 'provisioningState'])
             ->when(
                 Gate::denies('create', [Extension::class, $organization]),
                 fn ($query) => $query->whereBelongsTo($request->user()),
@@ -58,7 +58,7 @@ class ExtensionController extends Controller
         Gate::authorize('view', $extension);
 
         return ExtensionResource::make(
-            $extension->load(['dialableNumber', 'user', 'provisioningState']),
+            $extension->load(['dialableNumber', 'user', 'fallbackExtension', 'provisioningState']),
         );
     }
 
