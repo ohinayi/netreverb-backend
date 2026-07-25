@@ -53,7 +53,14 @@ class CallLogController extends Controller
         }
 
         $callLogQuery = $organization->callLogs()
-            ->with(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber'])
+            ->with([
+                'callerExtension.dialableNumber',
+                'callerExtension.user',
+                'callerExtension.fallbackExtension',
+                'calleeExtension.dialableNumber',
+                'calleeExtension.user',
+                'calleeExtension.fallbackExtension',
+            ])
             ->when(
                 ! $canManage,
                 function ($query) use ($request): void {
@@ -140,7 +147,7 @@ class CallLogController extends Controller
             'destination' => $request->string('destination')->toString(),
         ]);
 
-        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+        return CallLogResource::make($callLog->load($this->callLogRelations()));
     }
 
     /**
@@ -179,7 +186,7 @@ class CallLogController extends Controller
             'status' => $callLog->status instanceof \BackedEnum ? $callLog->status->value : $callLog->status,
         ]);
 
-        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']))
+        return CallLogResource::make($callLog->load($this->callLogRelations()))
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
     }
@@ -224,7 +231,7 @@ class CallLogController extends Controller
         $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
         $request->attributes->set('telephony_status', $telephonyStatus);
 
-        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+        return CallLogResource::make($callLog->load($this->callLogRelations()));
     }
 
     /**
@@ -267,7 +274,7 @@ class CallLogController extends Controller
             'status' => $callLog->status instanceof \BackedEnum ? $callLog->status->value : $callLog->status,
         ]);
 
-        return CallLogResource::make($callLog->load(['callerExtension.dialableNumber', 'calleeExtension.dialableNumber']));
+        return CallLogResource::make($callLog->load($this->callLogRelations()));
     }
 
     /**
@@ -347,6 +354,19 @@ class CallLogController extends Controller
         }
 
         return $priority;
+    }
+
+    /** @return list<string> */
+    private function callLogRelations(): array
+    {
+        return [
+            'callerExtension.dialableNumber',
+            'callerExtension.user',
+            'callerExtension.fallbackExtension',
+            'calleeExtension.dialableNumber',
+            'calleeExtension.user',
+            'calleeExtension.fallbackExtension',
+        ];
     }
 
     /**

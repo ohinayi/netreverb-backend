@@ -73,7 +73,11 @@ class CallRecordingController extends Controller
 
         return CallLogResource::make($callLog->fresh([
             'callerExtension.dialableNumber',
+            'callerExtension.user',
+            'callerExtension.fallbackExtension',
             'calleeExtension.dialableNumber',
+            'calleeExtension.user',
+            'calleeExtension.fallbackExtension',
             'recordingUpload',
         ]));
     }
@@ -88,7 +92,11 @@ class CallRecordingController extends Controller
 
         return CallLogResource::make($callLog->fresh([
             'callerExtension.dialableNumber',
+            'callerExtension.user',
+            'callerExtension.fallbackExtension',
             'calleeExtension.dialableNumber',
+            'calleeExtension.user',
+            'calleeExtension.fallbackExtension',
             'recordingUpload',
         ]));
     }
@@ -108,7 +116,11 @@ class CallRecordingController extends Controller
 
         return CallLogResource::make($callLog->fresh([
             'callerExtension.dialableNumber',
+            'callerExtension.user',
+            'callerExtension.fallbackExtension',
             'calleeExtension.dialableNumber',
+            'calleeExtension.user',
+            'calleeExtension.fallbackExtension',
             'recordingUpload',
         ]));
     }
@@ -127,7 +139,11 @@ class CallRecordingController extends Controller
 
         return CallLogResource::make($callLog->fresh([
             'callerExtension.dialableNumber',
+            'callerExtension.user',
+            'callerExtension.fallbackExtension',
             'calleeExtension.dialableNumber',
+            'calleeExtension.user',
+            'calleeExtension.fallbackExtension',
             'recordingUpload',
         ]));
     }

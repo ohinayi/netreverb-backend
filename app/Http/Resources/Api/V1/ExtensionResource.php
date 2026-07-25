@@ -22,9 +22,14 @@ class ExtensionResource extends JsonResource
             'display_name' => $this->display_name,
             'type' => $this->type,
             'status' => $this->status,
-            'user_id' => $this->user?->public_id,
+            // Resources must not trigger hidden relationship queries. Some
+            // callers only need extension metadata (for example call logs).
+            'user_id' => $this->whenLoaded('user', fn (): ?string => $this->user?->public_id),
             'unavailable_action' => $this->unavailable_action,
-            'fallback_extension_id' => $this->fallbackExtension?->public_id,
+            'fallback_extension_id' => $this->whenLoaded(
+                'fallbackExtension',
+                fn (): ?string => $this->fallbackExtension?->public_id,
+            ),
             'ring_timeout_seconds' => $this->ring_timeout_seconds,
             'provisioning' => $this->whenLoaded('provisioningState', fn (): array => [
                 'status' => $this->provisioningState->status,
