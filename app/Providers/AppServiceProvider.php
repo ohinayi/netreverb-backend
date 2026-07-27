@@ -25,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -63,6 +64,31 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('sip-registration', fn (Request $request): Limit => Limit::perMinute(10)
             ->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip())));
 
+        RateLimiter::for('auth-login', fn (Request $request): array => [
+            Limit::perMinute(5)->by('login:'.$this->hashedEmail($request)),
+            Limit::perMinute(20)->by('login-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('auth-registration', fn (Request $request): array => [
+            Limit::perMinute(3)->by('registration:'.$this->hashedEmail($request)),
+            Limit::perMinute(10)->by('registration-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('password-recovery', fn (Request $request): array => [
+            Limit::perMinute(3)->by('password-recovery:'.$this->hashedEmail($request)),
+            Limit::perMinute(10)->by('password-recovery-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('password-reset', fn (Request $request): array => [
+            Limit::perMinute(5)->by('password-reset:'.$this->hashedEmail($request)),
+            Limit::perMinute(20)->by('password-reset-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('message-send', fn (Request $request): array => [
+            Limit::perMinute(60)->by('message-user:'.($request->user()?->getAuthIdentifier() ?? $request->ip())),
+            Limit::perMinute(180)->by('message-ip:'.$request->ip()),
+        ]);
+
         VerifyEmail::createUrlUsing(function (object $notifiable): string {
             $verificationUrl = URL::temporarySignedRoute(
                 'verification.verify',
@@ -89,5 +115,10 @@ class AppServiceProvider extends ServiceProvider
                     encoding_type: PHP_QUERY_RFC3986,
                 );
         });
+    }
+
+    private function hashedEmail(Request $request): string
+    {
+        return hash('sha256', Str::lower(trim($request->string('email')->toString())));
     }
 }

@@ -17,7 +17,7 @@ class UpdateOrganizationMemberRequest extends FormRequest
     {
         return [
             'department_public_id' => ['sometimes', 'nullable', 'string', 'exists:departments,public_id'],
-            'role' => ['sometimes', 'string', 'in:owner,admin,telephony_admin,department_manager,supervisor,auditor,member'],
+            'role' => ['sometimes', 'string', 'in:admin,supervisor,agent'],
             'status' => ['sometimes', 'string', 'in:invited,active,suspended'],
         ];
     }

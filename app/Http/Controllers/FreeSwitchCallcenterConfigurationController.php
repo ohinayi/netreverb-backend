@@ -13,6 +13,10 @@ class FreeSwitchCallcenterConfigurationController extends Controller
         $token = (string) config('telephony.freeswitch.xml_curl_token');
         abort_if($token === '' || ! hash_equals($token, (string) $request->query('token')), 403);
 
+        /** @var array<int, string> $allowedIps */
+        $allowedIps = config('telephony.freeswitch.xml_curl_allowed_ips', []);
+        abort_unless(in_array($request->ip(), $allowedIps, true), 403);
+
         // mod_xml_curl receives every configuration lookup.  Only answer the
         // callcenter lookup and let FreeSWITCH continue to use its local XML
         // files for every other module.

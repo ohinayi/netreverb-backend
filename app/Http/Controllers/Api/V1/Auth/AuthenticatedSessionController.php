@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
+use App\Actions\Extensions\ProvisionVerifiedUserExtension;
 use App\Actions\Organizations\SyncOrganizationMemberFriendships;
 use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
@@ -12,13 +13,16 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
-use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthenticatedSessionController extends Controller
 {
-    public function __construct(private SyncOrganizationMemberFriendships $syncFriendships) {}
+    public function __construct(
+        private SyncOrganizationMemberFriendships $syncFriendships,
+        private ProvisionVerifiedUserExtension $provisionExtension,
+    ) {}
 
     public function store(LoginRequest $request): JsonResponse
     {
@@ -57,22 +61,21 @@ class AuthenticatedSessionController extends Controller
             }
         }
 
-        $token = $user->createToken($request->string('device_name', 'web')->toString());
+        $this->provisionExtension->execute($user);
+
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
 
         return response()->json([
             'data' => UserResource::make($user),
-            'token' => $token->plainTextToken,
-            'token_type' => 'Bearer',
         ]);
     }
 
     public function destroy(Request $request): Response
     {
-        $token = $request->user()->currentAccessToken();
-
-        if ($token instanceof PersonalAccessToken) {
-            $token->delete();
-        }
+        Auth::guard('web')->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
         return response()->noContent();
     }

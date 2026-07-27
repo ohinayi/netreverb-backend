@@ -11,6 +11,7 @@ use App\Http\Requests\Api\V1\UpdateExtensionRequest;
 use App\Http\Resources\Api\V1\ExtensionResource;
 use App\Models\Extension;
 use App\Models\Organization;
+use App\Services\Auditing\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -23,6 +24,7 @@ class ExtensionController extends Controller
         private CreateExtension $createExtension,
         private UpdateExtension $updateExtension,
         private DeleteExtension $deleteExtension,
+        private AuditLogger $auditLogger,
     ) {}
 
     public function index(Request $request, Organization $organization): AnonymousResourceCollection
@@ -47,6 +49,7 @@ class ExtensionController extends Controller
     ): JsonResponse {
         Gate::authorize('create', [Extension::class, $organization]);
         $result = $this->createExtension->execute($organization, $request->validated());
+        $this->auditLogger->record($request, $request->user(), $organization, 'extension.created', $result->extension);
 
         $resource = ExtensionResource::make($result->extension);
         if ($result->sipPassword !== null) {
@@ -72,14 +75,21 @@ class ExtensionController extends Controller
     ): ExtensionResource {
         Gate::authorize('update', $extension);
 
-        return ExtensionResource::make(
-            $this->updateExtension->execute($extension, $request->validated()),
-        );
+        $before = $extension->only(['display_name', 'type', 'status', 'user_id', 'fallback_extension_id']);
+        $updated = $this->updateExtension->execute($extension, $request->validated());
+        $after = $updated->only(['display_name', 'type', 'status', 'user_id', 'fallback_extension_id']);
+        $action = array_key_exists('user_public_id', $request->validated()) && $before['user_id'] !== $after['user_id']
+            ? 'extension.reassigned'
+            : 'extension.updated';
+        $this->auditLogger->record($request, $request->user(), $organization, $action, $updated, $before, $after);
+
+        return ExtensionResource::make($updated);
     }
 
-    public function destroy(Organization $organization, Extension $extension): Response
+    public function destroy(Request $request, Organization $organization, Extension $extension): Response
     {
         Gate::authorize('delete', $extension);
+        $this->auditLogger->record($request, $request->user(), $organization, 'extension.deleted', $extension);
         $this->deleteExtension->execute($extension);
 
         return response()->noContent();

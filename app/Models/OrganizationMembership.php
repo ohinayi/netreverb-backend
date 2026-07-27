@@ -11,15 +11,16 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_id', 'user_id', 'department_id', 'invited_by', 'role', 'status', 'joined_at'])]
+#[Fillable(['organization_id', 'user_id', 'department_id', 'auto_assign_extension', 'invited_by', 'role', 'status', 'joined_at'])]
 class OrganizationMembership extends Model
 {
     /** @use HasFactory<OrganizationMembershipFactory> */
     use HasFactory, HasUlids;
 
     protected $attributes = [
-        'role' => MembershipRole::Member->value,
+        'role' => MembershipRole::Agent->value,
         'status' => MembershipStatus::Active->value,
+        'auto_assign_extension' => false,
     ];
 
     public function uniqueIds(): array
@@ -58,6 +59,7 @@ class OrganizationMembership extends Model
             'role' => MembershipRole::class,
             'status' => MembershipStatus::class,
             'joined_at' => 'datetime',
+            'auto_assign_extension' => 'boolean',
         ];
     }
 }

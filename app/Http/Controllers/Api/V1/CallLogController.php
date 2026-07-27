@@ -2,21 +2,23 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Enums\ExtensionStatus;
+use App\Exceptions\FreeSwitchTransferException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
-use App\Http\Requests\Api\V1\UpdateCallLogRequest;
 use App\Http\Requests\Api\V1\TransferCallRequest;
-use App\Exceptions\FreeSwitchTransferException;
+use App\Http\Requests\Api\V1\UpdateCallLogRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Extension;
 use App\Models\Organization;
+use App\Services\Auditing\AuditLogger;
+use App\Services\Authorization\CallLogVisibility;
 use App\Services\CallRecordings\CallRecordingManager;
 use App\Services\Telephony\FreeSwitchCallUuidSynchronizer;
-use App\Contracts\Telephony\FreeSwitchCallGateway;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -24,8 +26,8 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class CallLogController extends Controller
@@ -34,6 +36,8 @@ class CallLogController extends Controller
         private readonly FreeSwitchCallUuidSynchronizer $uuidSynchronizer,
         private readonly CallRecordingManager $recordingManager,
         private readonly FreeSwitchCallGateway $callGateway,
+        private readonly CallLogVisibility $callLogVisibility,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -43,8 +47,12 @@ class CallLogController extends Controller
     {
         Gate::authorize('viewAny', [CallLog::class, $organization]);
 
-        // Only Owner/Admin can view all call logs. Regular members are limited to their own.
-        $canManage = Gate::allows('viewAll', [CallLog::class, $organization]);
+        // Owners and admins can view all logs. Supervisors are limited to the
+        // extensions assigned to their department; agents see their own.
+        $canViewAll = Gate::allows('viewAll', [CallLog::class, $organization]);
+        $accessibleExtensionIds = $canViewAll
+            ? []
+            : $this->callLogVisibility->accessibleExtensionIds($request->user(), $organization);
 
         $filter = $request->string('filter', 'all')->toString();
 
@@ -62,12 +70,11 @@ class CallLogController extends Controller
                 'calleeExtension.fallbackExtension',
             ])
             ->when(
-                ! $canManage,
-                function ($query) use ($request): void {
-                    $userExtensionIds = $request->user()->extensions()->pluck('id')->toArray();
-                    $query->where(function ($q) use ($userExtensionIds): void {
-                        $q->whereIn('caller_extension_id', $userExtensionIds)
-                            ->orWhereIn('callee_extension_id', $userExtensionIds);
+                ! $canViewAll,
+                function ($query) use ($accessibleExtensionIds): void {
+                    $query->where(function ($q) use ($accessibleExtensionIds): void {
+                        $q->whereIn('caller_extension_id', $accessibleExtensionIds)
+                            ->orWhereIn('callee_extension_id', $accessibleExtensionIds);
                     });
                 }
             )
@@ -146,6 +153,14 @@ class CallLogController extends Controller
             'organization_id' => $organization->public_id,
             'destination' => $request->string('destination')->toString(),
         ]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'call.transferred',
+            $callLog,
+            after: ['destination' => $destination],
+        );
 
         return CallLogResource::make($callLog->load($this->callLogRelations()));
     }

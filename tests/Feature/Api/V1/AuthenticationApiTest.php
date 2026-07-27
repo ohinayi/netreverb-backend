@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Notifications\VerifyEmailNotification;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -29,8 +28,7 @@ class AuthenticationApiTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('data.email', 'person@example.com')
             ->assertJsonPath('data.email_verified', false)
-            ->assertJsonPath('token_type', 'Bearer')
-            ->assertJsonStructure(['token']);
+            ->assertJsonMissingPath('token');
 
         $user = User::query()->sole();
         $organization = Organization::query()->sole();
@@ -69,10 +67,10 @@ class AuthenticationApiTest extends TestCase
     public function test_unverified_user_cannot_access_tenant_apis(): void
     {
         Notification::fake();
-        $token = $this->postJson('/api/v1/auth/register', $this->registrationPayload())
-            ->json('token');
+        $this->postJson('/api/v1/auth/register', $this->registrationPayload());
+        $user = User::query()->sole();
 
-        $this->withToken($token)->getJson('/api/v1/organizations')->assertForbidden();
+        $this->actingAs($user)->getJson('/api/v1/organizations')->assertForbidden();
     }
 
     public function test_signed_verification_creates_exactly_one_automatic_extension(): void
@@ -90,10 +88,34 @@ class AuthenticationApiTest extends TestCase
         $this->getJson($verificationUrl)->assertOk();
         $this->getJson($verificationUrl)->assertOk();
 
-        $extension = Extension::query()->with('dialableNumber')->sole();
+        $extension = Extension::query()->with(['dialableNumber', 'organization'])->sole();
         $this->assertTrue($user->refresh()->hasVerifiedEmail());
         $this->assertSame('100000', $extension->dialableNumber->number);
         $this->assertSame($user->id, $extension->user_id);
+        Queue::assertPushed(ProvisionSipSubscriber::class, 1);
+    }
+
+    public function test_signed_verification_creates_an_automatic_extension_for_a_community_owner(): void
+    {
+        Notification::fake();
+        Queue::fake();
+
+        $this->postJson('/api/v1/auth/register', array_merge($this->registrationPayload(), [
+            'account_type' => 'community',
+            'workspace_name' => 'North Clinic',
+        ]));
+        $user = User::query()->sole();
+        $verificationUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            ['id' => $user->id, 'hash' => sha1($user->getEmailForVerification())],
+        );
+
+        $this->getJson($verificationUrl)->assertOk();
+
+        $extension = Extension::query()->with(['dialableNumber', 'organization'])->sole();
+        $this->assertSame($user->id, $extension->user_id);
+        $this->assertSame('North Clinic', $extension->organization->name);
         Queue::assertPushed(ProvisionSipSubscriber::class, 1);
     }
 
@@ -116,7 +138,7 @@ class AuthenticationApiTest extends TestCase
         $this->assertTrue(URL::hasValidSignature(Request::create($query['verification_url'])));
     }
 
-    public function test_invalid_login_uses_a_generic_error_and_valid_login_returns_a_token(): void
+    public function test_invalid_login_uses_a_generic_error_and_valid_login_starts_a_browser_session(): void
     {
         $user = User::factory()->create(['email' => 'person@example.com']);
 
@@ -129,17 +151,15 @@ class AuthenticationApiTest extends TestCase
             'email' => $user->email,
             'password' => 'password',
             'device_name' => 'browser',
-        ])->assertOk()->assertJsonStructure(['token']);
+        ])->assertOk()->assertJsonPath('data.email', $user->email)->assertJsonMissingPath('token');
     }
 
-    public function test_logout_revokes_the_current_token(): void
+    public function test_logout_ends_the_current_browser_session(): void
     {
         $user = User::factory()->create();
-        $token = $user->createToken('browser')->plainTextToken;
 
-        $this->withToken($token)->deleteJson('/api/v1/auth/logout')->assertNoContent();
-        Auth::forgetGuards();
-        $this->withToken($token)->getJson('/api/v1/me')->assertUnauthorized();
+        $this->actingAs($user)->deleteJson('/api/v1/auth/logout')->assertNoContent();
+        $this->getJson('/api/v1/me')->assertUnauthorized();
     }
 
     /** @return array<string, mixed> */

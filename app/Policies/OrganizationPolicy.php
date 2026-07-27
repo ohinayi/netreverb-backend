@@ -32,7 +32,13 @@ class OrganizationPolicy
 
     public function manageMembers(User $user, Organization $organization): bool
     {
-        if ($user->isSuperAdmin()) return true;
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($organization->isPersonalWorkspace()) {
+            return false;
+        }
 
         return in_array(
             $this->activeMembership($user, $organization)?->role,
@@ -58,7 +64,13 @@ class OrganizationPolicy
 
     private function canManage(User $user, Organization $organization): bool
     {
-        if ($user->isSuperAdmin()) return true;
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($organization->isPersonalWorkspace()) {
+            return false;
+        }
 
         return in_array(
             $this->activeMembership($user, $organization)?->role,

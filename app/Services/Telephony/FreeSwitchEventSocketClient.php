@@ -15,6 +15,7 @@ class FreeSwitchEventSocketClient
 
     public function api(string $command, ?int $timeoutSeconds = null): string
     {
+        $this->assertPasswordConfigured();
         $socket = $this->openSocket($timeoutSeconds);
 
         try {
@@ -42,6 +43,7 @@ class FreeSwitchEventSocketClient
      */
     public function events(array $eventNames, int $listenSeconds = 1): array
     {
+        $this->assertPasswordConfigured();
         $socket = $this->openSocket();
 
         try {
@@ -121,6 +123,13 @@ class FreeSwitchEventSocketClient
         stream_set_timeout($socket, $timeout);
 
         return $socket;
+    }
+
+    private function assertPasswordConfigured(): void
+    {
+        if (trim($this->password) === '') {
+            throw new RuntimeException('FreeSWITCH event socket password is not configured.');
+        }
     }
 
     /**

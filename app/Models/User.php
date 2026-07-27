@@ -51,6 +51,20 @@ class User extends Authenticatable implements MustVerifyEmailContract
         return (bool) ($this->attributes['is_super_admin'] ?? false);
     }
 
+    /**
+     * A personal account has a private technical workspace for its extension
+     * and call data, but it is not an organization administration account.
+     */
+    public function isIndividualAccount(): bool
+    {
+        return $this->account_type === AccountType::Individual;
+    }
+
+    public function isOrganizationAccount(): bool
+    {
+        return ! $this->isIndividualAccount();
+    }
+
     public function organizationMemberships(): HasMany
     {
         return $this->hasMany(OrganizationMembership::class);

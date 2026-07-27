@@ -30,11 +30,17 @@ class StoreOrganizationRequest extends FormRequest
             ],
             'timezone' => ['sometimes', 'string', 'timezone:all'],
             'locale' => ['sometimes', 'string', 'regex:/^[a-z]{2}(?:-[A-Z]{2})?$/'],
+            'assign_owner_extension' => ['sometimes', 'boolean'],
             'settings' => ['sometimes', 'nullable', 'array'],
             'settings.call_recording_announcement' => ['sometimes', 'array'],
             'settings.call_recording_announcement.enabled' => ['sometimes', 'boolean'],
             'settings.call_recording_announcement.target' => ['sometimes', Rule::enum(CallRecordingAnnouncementTarget::class)],
-            'settings.call_recording_announcement.audio_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'settings.call_recording_announcement.audio_path' => [
+                'sometimes',
+                'nullable',
+                'string',
+                Rule::in(config('telephony.call_recordings.announcement.allowed_audio_paths', [])),
+            ],
         ];
     }
 }

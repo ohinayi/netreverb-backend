@@ -7,11 +7,14 @@ use App\Enums\ExtensionType;
 use App\Enums\ProvisioningOperation;
 use App\Enums\ProvisioningStatus;
 use App\Jobs\ProvisionSipSubscriber;
+use App\Models\CallLog;
 use App\Models\Extension;
 use App\Models\SipProvisioningEvent;
 use App\Models\User;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class UpdateExtension
 {
@@ -20,6 +23,11 @@ class UpdateExtension
         $event = DB::transaction(function () use ($extension, $attributes): ?SipProvisioningEvent {
             $lockedExtension = Extension::query()->lockForUpdate()->findOrFail($extension->id);
             $previousStatus = $lockedExtension->status;
+            $assigneeChanged = $this->assigneeChanged($lockedExtension, $attributes);
+
+            if ($assigneeChanged) {
+                $this->ensureNotOnActiveCall($lockedExtension);
+            }
 
             $lockedExtension->update([
                 ...Arr::only($attributes, [
@@ -40,8 +48,15 @@ class UpdateExtension
                 return null;
             }
 
-            if (! array_key_exists('status', $attributes) || $lockedExtension->status === $previousStatus) {
+            if (
+                (! array_key_exists('status', $attributes) || $lockedExtension->status === $previousStatus)
+                && ! $assigneeChanged
+            ) {
                 return null;
+            }
+
+            if ($assigneeChanged) {
+                $lockedExtension->credential()->updateOrCreate([], ['password' => Str::random(48)]);
             }
 
             $state = $lockedExtension->provisioningState()->lockForUpdate()->firstOrFail();
@@ -81,5 +96,34 @@ class UpdateExtension
                 ? null
                 : User::query()->where('public_id', $attributes['user_public_id'])->valueOrFail('id'),
         ];
+    }
+
+    private function assigneeChanged(Extension $extension, array $attributes): bool
+    {
+        if (! array_key_exists('user_public_id', $attributes)) {
+            return false;
+        }
+
+        $newUserId = $attributes['user_public_id'] === null
+            ? null
+            : User::query()->where('public_id', $attributes['user_public_id'])->valueOrFail('id');
+
+        return $extension->user_id !== $newUserId;
+    }
+
+    private function ensureNotOnActiveCall(Extension $extension): void
+    {
+        $hasActiveCall = CallLog::query()
+            ->whereIn('status', ['ringing', 'in_progress'])
+            ->where(fn ($query) => $query
+                ->where('caller_extension_id', $extension->id)
+                ->orWhere('callee_extension_id', $extension->id))
+            ->exists();
+
+        if ($hasActiveCall) {
+            throw ValidationException::withMessages([
+                'user_public_id' => 'End the active call before reassigning this extension.',
+            ]);
+        }
     }
 }

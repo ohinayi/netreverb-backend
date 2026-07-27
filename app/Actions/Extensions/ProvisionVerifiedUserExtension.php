@@ -4,7 +4,7 @@ namespace App\Actions\Extensions;
 
 use App\Enums\ExtensionProvisioningMode;
 use App\Enums\ExtensionType;
-use App\Enums\MembershipRole;
+use App\Enums\MembershipStatus;
 use App\Models\Extension;
 use App\Models\OrganizationMembership;
 use App\Models\User;
@@ -26,21 +26,22 @@ class ProvisionVerifiedUserExtension
                 return null;
             }
 
-            $existingExtension = Extension::query()->whereBelongsTo($lockedUser)->first();
-
-            if ($existingExtension !== null) {
-                return $existingExtension;
-            }
-
-            $membership = OrganizationMembership::query()
+            $memberships = OrganizationMembership::query()
                 ->with('organization')
                 ->whereBelongsTo($lockedUser)
-                ->where('role', MembershipRole::Owner->value)
+                ->where('status', MembershipStatus::Active->value)
+                ->where('auto_assign_extension', true)
                 ->whereHas('organization', fn ($query) => $query
-                    ->where('extension_provisioning_mode', ExtensionProvisioningMode::Automatic->value)
-                    ->where('settings->kind', 'individual'))
+                    ->where('extension_provisioning_mode', ExtensionProvisioningMode::Automatic->value))
                 ->oldest('id')
-                ->first();
+                ->get();
+
+            $membership = $memberships->first(
+                fn (OrganizationMembership $membership): bool => ! Extension::query()
+                    ->whereBelongsTo($membership->organization)
+                    ->whereBelongsTo($lockedUser)
+                    ->exists(),
+            );
 
             if ($membership === null) {
                 return null;

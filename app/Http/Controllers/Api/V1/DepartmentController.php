@@ -8,6 +8,7 @@ use App\Http\Requests\Api\V1\UpdateDepartmentRequest;
 use App\Http\Resources\Api\V1\DepartmentResource;
 use App\Models\Department;
 use App\Models\Organization;
+use App\Services\Auditing\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -16,6 +17,8 @@ use Illuminate\Support\Str;
 
 class DepartmentController extends Controller
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     public function index(Organization $organization): AnonymousResourceCollection
     {
         Gate::authorize('view', $organization);
@@ -37,6 +40,7 @@ class DepartmentController extends Controller
             'description' => $request->input('description'),
             'color' => $request->input('color'),
         ]);
+        $this->auditLogger->record($request, $request->user(), $organization, 'department.created', $department);
 
         return DepartmentResource::make($department)->response()->setStatusCode(Response::HTTP_CREATED);
     }
@@ -48,7 +52,9 @@ class DepartmentController extends Controller
     ): DepartmentResource {
         Gate::authorize('update', $organization);
 
+        $before = $department->only(['name', 'slug', 'description', 'color']);
         $department->update($request->validated());
+        $this->auditLogger->record($request, $request->user(), $organization, 'department.updated', $department, $before, $department->fresh()->only(['name', 'slug', 'description', 'color']));
 
         return DepartmentResource::make($department->refresh());
     }

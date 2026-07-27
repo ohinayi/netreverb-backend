@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\V1;
 
 use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\MembershipRole;
+use App\Models\AuditEvent;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
@@ -167,13 +168,20 @@ class OrganizationApiTest extends TestCase
             'user_public_id' => $invitee->public_id,
         ])->assertCreated()
             ->assertJsonPath('data.user.id', $invitee->public_id)
-            ->assertJsonPath('data.status', 'invited');
+            ->assertJsonPath('data.status', 'active');
 
         $this->assertDatabaseHas('organization_memberships', [
             'organization_id' => $organization->id,
             'user_id' => $invitee->id,
-            'status' => 'invited',
+            'status' => 'active',
         ]);
+
+        $auditEvent = AuditEvent::query()->sole();
+        $this->assertSame('organization.member.invited', $auditEvent->action);
+        $this->assertSame($organization->id, $auditEvent->organization_id);
+        $this->assertSame($admin->id, $auditEvent->actor_user_id);
+        $this->assertSame('agent', $auditEvent->after['role']);
+        $this->assertSame('active', $auditEvent->after['status']);
     }
 
     public function test_admin_can_invite_a_new_member_by_email_and_a_user_account_is_created(): void

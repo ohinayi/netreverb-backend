@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'organization_id', 'extension_id', 'strategy', 'agent_ring_timeout_seconds',
+    'organization_id', 'department_id', 'extension_id', 'strategy', 'agent_ring_timeout_seconds',
     'max_wait_seconds', 'empty_queue_action', 'fallback_extension_id', 'enabled',
 ])]
 class CallQueue extends Model
@@ -29,6 +29,11 @@ class CallQueue extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function extension(): BelongsTo

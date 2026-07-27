@@ -4,34 +4,44 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ExtensionStatus;
 use App\Enums\ExtensionType;
+use App\Enums\MembershipRole;
+use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\UpsertCallQueueRequest;
 use App\Http\Resources\Api\V1\CallQueueResource;
 use App\Jobs\SynchronizeFreeSwitchQueue;
 use App\Models\CallQueue;
+use App\Models\Department;
 use App\Models\Extension;
 use App\Models\Organization;
+use App\Models\OrganizationMembership;
+use App\Models\User;
+use App\Services\Auditing\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 class CallQueueController extends Controller
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     public function index(Request $request, Organization $organization): AnonymousResourceCollection
     {
-        Gate::authorize('create', [Extension::class, $organization]);
+        $membership = $this->queueMembership($request->user(), $organization);
+        abort_unless($membership !== null, 403);
 
         return CallQueueResource::collection(
-            $organization->callQueues()->with($this->relations())->latest()->paginate(25),
+            $organization->callQueues()
+                ->when($membership->role === MembershipRole::Supervisor, fn ($query) => $query->where('department_id', $membership->department_id))
+                ->with($this->relations())->latest()->paginate(25),
         );
     }
 
     public function store(UpsertCallQueueRequest $request, Organization $organization): JsonResponse
     {
-        Gate::authorize('create', [Extension::class, $organization]);
+        $this->authorizeQueueManagement($request->user(), $organization);
         $attributes = $request->validated();
         $extension = $this->queueExtension($organization, $attributes['extension_public_id']);
 
@@ -44,6 +54,7 @@ class CallQueueController extends Controller
         $queue = DB::transaction(function () use ($organization, $extension, $attributes): CallQueue {
             $queue = $organization->callQueues()->create([
                 'extension_id' => $extension->id,
+                'department_id' => $this->departmentId($organization, $attributes['department_public_id'] ?? null),
                 ...$this->settings($organization, $extension, $attributes),
             ]);
             $this->syncMembers($queue, $organization, $extension, $attributes['members']);
@@ -51,6 +62,7 @@ class CallQueueController extends Controller
             return $queue;
         });
         SynchronizeFreeSwitchQueue::dispatch($queue->public_id)->afterCommit();
+        $this->auditLogger->record($request, $request->user(), $organization, 'queue.created', $queue);
 
         return CallQueueResource::make($queue->load($this->relations()))
             ->response()->setStatusCode(201);
@@ -61,7 +73,7 @@ class CallQueueController extends Controller
         Organization $organization,
         CallQueue $callQueue,
     ): CallQueueResource {
-        Gate::authorize('create', [Extension::class, $organization]);
+        $this->authorizeQueueManagement($request->user(), $organization, $callQueue);
         $attributes = $request->validated();
         $extension = $this->queueExtension($organization, $attributes['extension_public_id']);
 
@@ -71,21 +83,27 @@ class CallQueueController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($callQueue, $organization, $extension, $attributes): void {
-            $callQueue->update($this->settings($organization, $extension, $attributes));
+        DB::transaction(function () use ($callQueue, $organization, $extension, $attributes, $request): void {
+            $settings = $this->settings($organization, $extension, $attributes);
+            if ($request->user()->isSuperAdmin() || $this->queueMembership($request->user(), $organization)?->role !== MembershipRole::Supervisor) {
+                $settings['department_id'] = $this->departmentId($organization, $attributes['department_public_id'] ?? null) ?? $callQueue->department_id;
+            }
+            $callQueue->update($settings);
             $this->syncMembers($callQueue, $organization, $extension, $attributes['members']);
         });
         SynchronizeFreeSwitchQueue::dispatch($callQueue->public_id)->afterCommit();
+        $this->auditLogger->record($request, $request->user(), $organization, 'queue.updated', $callQueue);
 
         return CallQueueResource::make($callQueue->fresh()->load($this->relations()));
     }
 
-    public function destroy(Organization $organization, CallQueue $callQueue): JsonResponse
+    public function destroy(Request $request, Organization $organization, CallQueue $callQueue): JsonResponse
     {
-        Gate::authorize('create', [Extension::class, $organization]);
+        $this->authorizeQueueManagement($request->user(), $organization, $callQueue);
         $queueName = 'nr_'.$callQueue->load('extension.dialableNumber')->extension->dialableNumber->number.'@default';
         $callQueue->delete();
         SynchronizeFreeSwitchQueue::dispatch($queueName, true)->afterCommit();
+        $this->auditLogger->record($request, $request->user(), $organization, 'queue.deleted', $callQueue);
 
         return response()->json(status: 204);
     }
@@ -146,12 +164,15 @@ class CallQueueController extends Controller
                 'extension_public_id' => 'Choose an active extension with the Queue type.',
             ]);
         }
+
         return $extension;
     }
 
     private function organizationExtension(Organization $organization, ?string $publicId): ?Extension
     {
-        if ($publicId === null || $publicId === '') return null;
+        if ($publicId === null || $publicId === '') {
+            return null;
+        }
 
         return Extension::query()
             ->whereBelongsTo($organization)
@@ -162,6 +183,32 @@ class CallQueueController extends Controller
 
     private function relations(): array
     {
-        return ['extension.dialableNumber', 'fallbackExtension', 'members.extension.dialableNumber'];
+        return ['department', 'extension.dialableNumber', 'fallbackExtension', 'members.extension.dialableNumber'];
+    }
+
+    private function departmentId(Organization $organization, ?string $publicId): ?int
+    {
+        if ($publicId === null || $publicId === '') {
+            return null;
+        }
+
+        return Department::query()->whereBelongsTo($organization)->where('public_id', $publicId)->valueOrFail('id');
+    }
+
+    private function authorizeQueueManagement(User $user, Organization $organization, ?CallQueue $queue = null): void
+    {
+        if ($user->isSuperAdmin()) {
+            return;
+        }
+        $membership = $this->queueMembership($user, $organization);
+        if (in_array($membership?->role, [MembershipRole::Owner, MembershipRole::Admin, MembershipRole::TelephonyAdmin], true)) {
+            return;
+        }
+        abort_unless($membership?->role === MembershipRole::Supervisor && $membership->department_id !== null && $queue?->department_id === $membership->department_id, 403);
+    }
+
+    private function queueMembership(User $user, Organization $organization): ?OrganizationMembership
+    {
+        return OrganizationMembership::query()->whereBelongsTo($organization)->whereBelongsTo($user)->where('status', MembershipStatus::Active->value)->first();
     }
 }

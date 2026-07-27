@@ -11,6 +11,7 @@ use App\Enums\CallStatus;
 use App\Enums\MembershipRole;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
+use App\Models\Department;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
@@ -815,6 +816,44 @@ class CallLogApiTest extends TestCase
 
         $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}")
             ->assertNotFound();
+    }
+
+    public function test_supervisor_only_sees_call_logs_for_their_department(): void
+    {
+        $organization = Organization::factory()->create();
+        $support = Department::factory()->for($organization)->create();
+        $sales = Department::factory()->for($organization)->create();
+        $supervisor = User::factory()->create();
+        $supportAgent = User::factory()->create();
+        $salesAgent = User::factory()->create();
+
+        OrganizationMembership::factory()->for($organization)->for($supervisor)->create([
+            'role' => MembershipRole::Supervisor,
+            'department_id' => $support->id,
+        ]);
+        OrganizationMembership::factory()->for($organization)->for($supportAgent)->create([
+            'department_id' => $support->id,
+        ]);
+        OrganizationMembership::factory()->for($organization)->for($salesAgent)->create([
+            'department_id' => $sales->id,
+        ]);
+
+        $supportCall = CallLog::factory()->for($organization)->create([
+            'caller_extension_id' => Extension::factory()->for($organization)->for($supportAgent)->create()->id,
+        ]);
+        $salesCall = CallLog::factory()->for($organization)->create([
+            'caller_extension_id' => Extension::factory()->for($organization)->for($salesAgent)->create()->id,
+        ]);
+
+        Sanctum::actingAs($supervisor);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs")
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $supportCall->public_id)
+            ->assertJsonMissing(['id' => $salesCall->public_id]);
+
+        $this->getJson("/api/v1/organizations/{$organization->public_id}/call-logs/{$salesCall->public_id}")
+            ->assertForbidden();
     }
 
     /** @return array{User, Organization} */

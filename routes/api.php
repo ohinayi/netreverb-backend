@@ -1,13 +1,14 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
-use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
+use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
-use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CallQueueController;
+use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
@@ -32,13 +33,13 @@ Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterC
     ->name('freeswitch.callcenter.configuration');
 
 Route::prefix('v1')->group(function (): void {
-    Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:5,1');
+    Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:auth-registration');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
-        ->middleware('throttle:5,1');
+        ->middleware('throttle:auth-login');
     Route::post('auth/forgot-password', [PasswordResetController::class, 'store'])
-        ->middleware('throttle:3,1');
+        ->middleware('throttle:password-recovery');
     Route::post('auth/reset-password', [PasswordResetController::class, 'update'])
-        ->middleware('throttle:5,1');
+        ->middleware('throttle:password-reset');
     Route::get('email/verify/{id}/{hash}', EmailVerificationController::class)
         ->middleware(['signed', 'throttle:6,1'])
         ->name('verification.verify');
@@ -90,10 +91,13 @@ Route::prefix('v1')->group(function (): void {
                 ->name('communities.members.department');
             Route::apiResource('conversations', ConversationController::class)->only(['index', 'store', 'show']);
             Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
+                ->middleware('throttle:message-send')
                 ->name('conversations.messages.store');
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
+                Route::get('organizations/{organization}/audit-events', [AuditEventController::class, 'index'])
+                    ->name('organizations.audit-events.index');
                 Route::apiResource('organizations.call-queues', CallQueueController::class)
                     ->only(['index', 'store', 'update', 'destroy'])
                     ->parameters(['call-queues' => 'callQueue']);

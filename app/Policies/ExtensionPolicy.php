@@ -2,9 +2,9 @@
 
 namespace App\Policies;
 
+use App\Enums\ExtensionType;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
-use App\Enums\ExtensionType;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
@@ -63,7 +63,15 @@ class ExtensionPolicy
 
     private function canManage(User $user, Organization|int $organization): bool
     {
-        if ($user->isSuperAdmin()) return true;
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        // Individual accounts may use their provisioned extension, but only an
+        // organization account may administer tenant-wide SIP identities.
+        if ($user->isIndividualAccount()) {
+            return false;
+        }
 
         return in_array(
             $this->activeMembership($user, $organization)?->role,

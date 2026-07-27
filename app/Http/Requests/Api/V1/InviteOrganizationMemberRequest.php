@@ -20,7 +20,8 @@ class InviteOrganizationMemberRequest extends FormRequest
             'email' => ['sometimes', 'nullable', 'email:rfc', 'max:255', 'required_without:user_public_id'],
             'name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'department_public_id' => ['sometimes', 'nullable', 'string', 'exists:departments,public_id'],
-            'role' => ['sometimes', 'nullable', 'in:owner,admin,telephony_admin,department_manager,supervisor,auditor,member'],
+            'role' => ['sometimes', 'nullable', 'in:admin,supervisor,agent'],
+            'assign_extension' => ['sometimes', 'boolean'],
         ];
     }
 }

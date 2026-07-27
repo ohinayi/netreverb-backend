@@ -33,6 +33,13 @@ return [
             'enabled' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_ENABLED', true),
             'default_target' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_DEFAULT_TARGET', 'both'),
             'default_audio_path' => env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_DEFAULT_AUDIO_PATH', '/usr/local/freeswitch/sounds/custom/recording_notice.wav'),
+            'allowed_audio_paths' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env(
+                    'FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_ALLOWED_AUDIO_PATHS',
+                    env('FREESWITCH_CALL_RECORDING_ANNOUNCEMENT_DEFAULT_AUDIO_PATH', '/usr/local/freeswitch/sounds/custom/recording_notice.wav'),
+                )),
+            ))),
         ],
         'sync' => [
             'enabled' => env('FREESWITCH_CALL_RECORDINGS_AUTO_SYNC', true),
@@ -49,12 +56,13 @@ return [
     'freeswitch' => [
         'event_socket_host' => env('FREESWITCH_EVENT_SOCKET_HOST', env('FREESWITCH_HOST', '127.0.0.1')),
         'event_socket_port' => (int) env('FREESWITCH_EVENT_SOCKET_PORT', env('FREESWITCH_PORT', 8021)),
-        // Keep the long-standing FREESWITCH_PASSWORD setting authoritative.
-        // Some deployments still carry an old event-socket-specific value;
-        // that must not silently override the working FreeSWITCH credential.
-        'event_socket_password' => env('FREESWITCH_PASSWORD', env('FREESWITCH_EVENT_SOCKET_PASSWORD', 'ClueCon')),
+        'event_socket_password' => env('FREESWITCH_PASSWORD', env('FREESWITCH_EVENT_SOCKET_PASSWORD')),
         'event_socket_timeout_seconds' => (int) env('FREESWITCH_EVENT_SOCKET_TIMEOUT_SECONDS', 5),
         'xml_curl_token' => env('FREESWITCH_XML_CURL_TOKEN'),
+        'xml_curl_allowed_ips' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('FREESWITCH_XML_CURL_ALLOWED_IPS', '127.0.0.1,::1')),
+        ))),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
         // Browser extensions are routed by the public dialplan.  Sending a
         // blind transfer to `default` hits its catch-all/sleep rule instead

@@ -2,6 +2,7 @@
 
 namespace App\Actions\Organizations;
 
+use App\Actions\Extensions\ProvisionVerifiedUserExtension;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
 use App\Models\Department;
@@ -14,14 +15,17 @@ use Illuminate\Support\Str;
 
 class AddOrganizationMember
 {
-    public function __construct(private SyncOrganizationMemberFriendships $syncFriendships) {}
+    public function __construct(
+        private SyncOrganizationMemberFriendships $syncFriendships,
+        private ProvisionVerifiedUserExtension $provisionExtension,
+    ) {}
 
     /**
-     * @param  array{user_public_id?: ?string, email?: ?string, name?: ?string, department_public_id?: ?string, role?: ?string}  $attributes
+     * @param  array{user_public_id?: ?string, email?: ?string, name?: ?string, department_public_id?: ?string, role?: ?string, assign_extension?: bool}  $attributes
      */
     public function execute(Organization $organization, User $invitedBy, array $attributes): OrganizationMembership
     {
-        return DB::transaction(function () use ($organization, $invitedBy, $attributes): OrganizationMembership {
+        $membership = DB::transaction(function () use ($organization, $invitedBy, $attributes): OrganizationMembership {
             $user = $this->resolveUser($attributes);
 
             $department = null;
@@ -39,10 +43,11 @@ class AddOrganizationMember
                 ],
                 [
                     'department_id' => $department?->id,
+                    'auto_assign_extension' => (bool) ($attributes['assign_extension'] ?? false),
                     'invited_by' => $invitedBy->id,
                     'role' => isset($attributes['role'])
                         ? MembershipRole::from($attributes['role'])
-                        : MembershipRole::Member,
+                        : MembershipRole::Agent,
                     // Organization admins control membership acceptance. The
                     // invitee only needs to complete the secure password-reset
                     // link before signing in to their assigned workspace.
@@ -55,6 +60,13 @@ class AddOrganizationMember
 
             return $membership;
         });
+
+        $membership->loadMissing('user');
+        if ($membership->auto_assign_extension && $membership->user->hasVerifiedEmail()) {
+            $this->provisionExtension->execute($membership->user);
+        }
+
+        return $membership;
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Http\Requests\Api\V1\Auth\RegisterRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 
 class RegisteredUserController extends Controller
 {
@@ -16,12 +17,11 @@ class RegisteredUserController extends Controller
     public function __invoke(RegisterRequest $request): JsonResponse
     {
         $user = $this->registerUser->execute($request->validated());
-        $token = $user->createToken($request->string('device_name', 'web')->toString());
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
 
         return response()->json([
             'data' => UserResource::make($user),
-            'token' => $token->plainTextToken,
-            'token_type' => 'Bearer',
         ], Response::HTTP_CREATED);
     }
 }

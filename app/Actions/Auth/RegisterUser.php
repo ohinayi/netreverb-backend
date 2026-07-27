@@ -43,6 +43,8 @@ class RegisterUser
                 'timezone' => $user->timezone,
                 'locale' => $user->locale,
                 'settings' => ['kind' => $accountType->value],
+                'assign_owner_extension' => $accountType === AccountType::Individual
+                    || (bool) ($attributes['assign_extension'] ?? false),
             ]);
 
             return $user;

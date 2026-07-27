@@ -8,9 +8,12 @@ use App\Models\CallLog;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
+use App\Services\Authorization\CallLogVisibility;
 
 class CallLogPolicy
 {
+    public function __construct(private readonly CallLogVisibility $visibility) {}
+
     public function viewAny(User $user, Organization $organization): bool
     {
         return $this->activeMembership($user, $organization) !== null;
@@ -18,23 +21,12 @@ class CallLogPolicy
 
     public function viewAll(User $user, Organization $organization): bool
     {
-        return $this->canViewAll($user, $organization);
+        return $this->visibility->canViewAll($user, $organization);
     }
 
     public function view(User $user, CallLog $callLog): bool
     {
-        if ($this->activeMembership($user, $callLog->organization_id) === null) {
-            return false;
-        }
-
-        if ($this->canViewAll($user, $callLog->organization_id)) {
-            return true;
-        }
-
-        $userExtensionIds = $user->extensions()->pluck('id')->toArray();
-
-        return ($callLog->caller_extension_id !== null && in_array($callLog->caller_extension_id, $userExtensionIds, true))
-            || ($callLog->callee_extension_id !== null && in_array($callLog->callee_extension_id, $userExtensionIds, true));
+        return $this->visibility->canView($user, $callLog);
     }
 
     public function create(User $user, Organization $organization): bool
@@ -80,7 +72,19 @@ class CallLogPolicy
 
     private function canManage(User $user, Organization|int $organization): bool
     {
-        if ($user->isSuperAdmin()) return true;
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        $organizationModel = $organization instanceof Organization
+            ? $organization
+            : Organization::query()->find($organization);
+
+        // A personal workspace can place and receive calls, but it cannot use
+        // organization controls such as transferring a live call to a team.
+        if ($organizationModel?->isPersonalWorkspace()) {
+            return false;
+        }
 
         return in_array(
             $this->activeMembership($user, $organization)?->role,
@@ -88,24 +92,6 @@ class CallLogPolicy
                 MembershipRole::Owner,
                 MembershipRole::Admin,
                 MembershipRole::TelephonyAdmin,
-                MembershipRole::Supervisor,
-            ],
-            strict: true,
-        );
-    }
-
-    private function canViewAll(User $user, Organization|int $organization): bool
-    {
-        if ($user->isSuperAdmin()) return true;
-
-        return in_array(
-            $this->activeMembership($user, $organization)?->role,
-            [
-                MembershipRole::Owner,
-                MembershipRole::Admin,
-                MembershipRole::TelephonyAdmin,
-                MembershipRole::Supervisor,
-                MembershipRole::Auditor,
             ],
             strict: true,
         );

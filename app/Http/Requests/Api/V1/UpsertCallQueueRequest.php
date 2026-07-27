@@ -16,6 +16,7 @@ class UpsertCallQueueRequest extends FormRequest
     {
         return [
             'extension_public_id' => ['required', 'string'],
+            'department_public_id' => ['sometimes', 'nullable', 'string', 'exists:departments,public_id'],
             'strategy' => ['required', Rule::in(['top-down', 'longest-idle-agent', 'round-robin', 'ring-all'])],
             'agent_ring_timeout_seconds' => ['required', 'integer', 'min:10', 'max:60'],
             'max_wait_seconds' => ['required', 'integer', 'min:30', 'max:3600'],

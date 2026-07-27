@@ -11,6 +11,8 @@ class CallQueueResource extends JsonResource
     {
         return [
             'id' => $this->public_id,
+            'department_id' => $this->whenLoaded('department', fn (): ?string => $this->department?->public_id),
+            'department_name' => $this->whenLoaded('department', fn (): ?string => $this->department?->name),
             'extension_id' => $this->whenLoaded('extension', fn (): ?string => $this->extension?->public_id),
             'number' => $this->whenLoaded('extension', fn (): ?string => $this->extension?->dialableNumber?->number),
             'display_name' => $this->whenLoaded('extension', fn (): ?string => $this->extension?->display_name),

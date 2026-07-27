@@ -109,7 +109,11 @@ class Organization extends Model
         $defaultEnabled = (bool) config('telephony.call_recordings.announcement.enabled', true);
         $defaultTarget = (string) config('telephony.call_recordings.announcement.default_target', CallRecordingAnnouncementTarget::Both->value);
         $defaultAudioPath = config('telephony.call_recordings.announcement.default_audio_path');
-        $audioPath = $announcementSettings['audio_path'] ?? $defaultAudioPath;
+        $requestedAudioPath = $announcementSettings['audio_path'] ?? $defaultAudioPath;
+        $allowedAudioPaths = config('telephony.call_recordings.announcement.allowed_audio_paths', []);
+        $audioPath = in_array($requestedAudioPath, $allowedAudioPaths, true)
+            ? $requestedAudioPath
+            : $defaultAudioPath;
 
         return [
             'enabled' => (bool) ($announcementSettings['enabled'] ?? $defaultEnabled),
@@ -133,6 +137,18 @@ class Organization extends Model
     public function callRecordingAnnouncementAudioPath(): ?string
     {
         return $this->callRecordingAnnouncementSettings()['audio_path'];
+    }
+
+    /**
+     * Individual users retain a private workspace so existing extensions,
+     * call logs and SIP provisioning continue to have a tenant boundary. It
+     * must not expose organization administration capabilities.
+     */
+    public function isPersonalWorkspace(): bool
+    {
+        $settings = is_array($this->settings) ? $this->settings : [];
+
+        return ($settings['kind'] ?? null) === 'individual';
     }
 
     public function scopeVisibleTo(Builder $query, User $user): Builder

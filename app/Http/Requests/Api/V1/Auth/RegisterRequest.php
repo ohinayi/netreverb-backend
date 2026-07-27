@@ -57,6 +57,7 @@ class RegisterRequest extends FormRequest
                 'min:2',
                 'max:120',
             ],
+            'assign_extension' => ['sometimes', 'boolean'],
             'terms_accepted' => ['required', 'accepted'],
             'device_name' => ['sometimes', 'string', 'min:2', 'max:100'],
         ];

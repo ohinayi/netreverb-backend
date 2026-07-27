@@ -10,9 +10,11 @@ use App\Http\Requests\Api\V1\UploadCallRecordingChunkRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\Organization;
+use App\Services\Auditing\AuditLogger;
 use App\Services\CallRecordings\CallRecordingManager;
 use App\Services\CallRecordings\DirectVideoRecordingUploadManager;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -23,6 +25,7 @@ class CallRecordingController extends Controller
     public function __construct(
         private readonly CallRecordingManager $recordingManager,
         private readonly DirectVideoRecordingUploadManager $uploadManager,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function start(
@@ -149,6 +152,7 @@ class CallRecordingController extends Controller
     }
 
     public function show(
+        Request $request,
         Organization $organization,
         CallLog $callLog,
     ): BinaryFileResponse {
@@ -167,6 +171,15 @@ class CallRecordingController extends Controller
 
             abort(404);
         }
+
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'call.recording.accessed',
+            $callLog,
+            after: ['recording_file_name' => $callLog->recording_file_name],
+        );
 
         return response()->file(
             $disk->path($callLog->recording_file_path),

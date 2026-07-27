@@ -25,7 +25,7 @@ class OrganizationMembershipFactory extends Factory
             'organization_id' => Organization::factory(),
             'user_id' => User::factory(),
             'invited_by' => null,
-            'role' => MembershipRole::Member,
+            'role' => MembershipRole::Agent,
             'status' => MembershipStatus::Active,
             'joined_at' => now(),
         ];
