@@ -6,6 +6,7 @@ use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Recordings\ConferenceRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
+use App\Contracts\Telephony\FreeSwitchQueueGateway;
 use App\Contracts\Telephony\SipSubscriberGateway;
 use App\Models\User;
 use App\Observers\UserObserver;
@@ -15,6 +16,7 @@ use App\Services\Telephony\DatabaseSipSubscriberGateway;
 use App\Services\Telephony\FreeSwitchEventSocketClient;
 use App\Services\Telephony\SocketFreeSwitchCallGateway;
 use App\Services\Telephony\SocketFreeSwitchConferenceGateway;
+use App\Services\Telephony\SocketFreeSwitchQueueGateway;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -44,6 +46,7 @@ class AppServiceProvider extends ServiceProvider
         });
         $this->app->bind(FreeSwitchConferenceGateway::class, SocketFreeSwitchConferenceGateway::class);
         $this->app->bind(FreeSwitchCallGateway::class, SocketFreeSwitchCallGateway::class);
+        $this->app->bind(FreeSwitchQueueGateway::class, SocketFreeSwitchQueueGateway::class);
     }
 
     /**

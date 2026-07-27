@@ -54,6 +54,7 @@ return [
         // that must not silently override the working FreeSWITCH credential.
         'event_socket_password' => env('FREESWITCH_PASSWORD', env('FREESWITCH_EVENT_SOCKET_PASSWORD', 'ClueCon')),
         'event_socket_timeout_seconds' => (int) env('FREESWITCH_EVENT_SOCKET_TIMEOUT_SECONDS', 5),
+        'xml_curl_token' => env('FREESWITCH_XML_CURL_TOKEN'),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
         // Browser extensions are routed by the public dialplan.  Sending a
         // blind transfer to `default` hits its catch-all/sleep rule instead

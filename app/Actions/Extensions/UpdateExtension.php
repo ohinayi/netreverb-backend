@@ -3,6 +3,7 @@
 namespace App\Actions\Extensions;
 
 use App\Enums\ExtensionStatus;
+use App\Enums\ExtensionType;
 use App\Enums\ProvisioningOperation;
 use App\Enums\ProvisioningStatus;
 use App\Jobs\ProvisionSipSubscriber;
@@ -27,6 +28,17 @@ class UpdateExtension
                 ]),
                 ...$this->assigneeAttributes($attributes),
             ]);
+
+            if ($lockedExtension->type === ExtensionType::Queue) {
+                $lockedExtension->provisioningState()->lockForUpdate()->first()?->update([
+                    'applied_revision' => 1,
+                    'status' => ProvisioningStatus::Active,
+                    'provisioned_at' => now(),
+                    'last_error' => null,
+                ]);
+
+                return null;
+            }
 
             if (! array_key_exists('status', $attributes) || $lockedExtension->status === $previousStatus) {
                 return null;

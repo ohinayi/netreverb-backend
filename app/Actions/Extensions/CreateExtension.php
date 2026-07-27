@@ -5,6 +5,7 @@ namespace App\Actions\Extensions;
 use App\Data\ExtensionCreationResult;
 use App\Enums\DialableNumberType;
 use App\Enums\ExtensionStatus;
+use App\Enums\ExtensionType;
 use App\Enums\ProvisioningOperation;
 use App\Enums\ProvisioningStatus;
 use App\Jobs\ProvisionSipSubscriber;
@@ -28,21 +29,26 @@ class CreateExtension
                     'type' => DialableNumberType::Extension,
                 ]);
 
+                $isQueue = $attributes['type'] === ExtensionType::Queue->value;
                 $extension = $organization->extensions()->create([
                     'dialable_number_id' => $dialableNumber->id,
                     'user_id' => $this->resolveUserId(Arr::get($attributes, 'user_public_id')),
                     'display_name' => $attributes['display_name'],
                     'type' => $attributes['type'],
-                    'status' => ExtensionStatus::Pending,
+                    'status' => $isQueue ? ExtensionStatus::Active : ExtensionStatus::Pending,
                 ]);
 
-                $sipPassword = Str::random(48);
-                $extension->credential()->create(['password' => $sipPassword]);
+                $sipPassword = $isQueue ? null : Str::random(48);
+                if ($sipPassword !== null) {
+                    $extension->credential()->create(['password' => $sipPassword]);
+                }
                 $extension->provisioningState()->create([
                     'desired_revision' => 1,
-                    'status' => ProvisioningStatus::Pending,
+                    'applied_revision' => $isQueue ? 1 : 0,
+                    'status' => $isQueue ? ProvisioningStatus::Active : ProvisioningStatus::Pending,
+                    'provisioned_at' => $isQueue ? now() : null,
                 ]);
-                $event = $extension->provisioningEvents()->create([
+                $event = $isQueue ? null : $extension->provisioningEvents()->create([
                     'operation' => ProvisioningOperation::Upsert,
                     'revision' => 1,
                     'available_at' => now(),
@@ -53,7 +59,9 @@ class CreateExtension
             attempts: 3,
         );
 
-        ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
+        if ($event !== null) {
+            ProvisionSipSubscriber::dispatch($event->id)->afterCommit();
+        }
 
         return new ExtensionCreationResult(
             $extension->load(['dialableNumber', 'user', 'provisioningState']),

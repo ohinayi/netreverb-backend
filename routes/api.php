@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\CallLogController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
+use App\Http\Controllers\Api\V1\CallQueueController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
@@ -22,9 +23,13 @@ use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
+use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterConfigurationController::class)
+    ->name('freeswitch.callcenter.configuration');
 
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:5,1');
@@ -89,6 +94,9 @@ Route::prefix('v1')->group(function (): void {
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
+                Route::apiResource('organizations.call-queues', CallQueueController::class)
+                    ->only(['index', 'store', 'update', 'destroy'])
+                    ->parameters(['call-queues' => 'callQueue']);
                 Route::apiResource('organizations.departments', DepartmentController::class)
                     ->only(['index', 'store', 'update']);
                 Route::get('organizations/{organization}/members', [OrganizationController::class, 'members'])

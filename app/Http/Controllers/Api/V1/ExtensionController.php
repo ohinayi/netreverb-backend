@@ -48,9 +48,12 @@ class ExtensionController extends Controller
         Gate::authorize('create', [Extension::class, $organization]);
         $result = $this->createExtension->execute($organization, $request->validated());
 
-        return ExtensionResource::make($result->extension)->additional([
-            'meta' => ['sip_password' => $result->sipPassword, 'display_once' => true],
-        ])->response()->setStatusCode(Response::HTTP_CREATED);
+        $resource = ExtensionResource::make($result->extension);
+        if ($result->sipPassword !== null) {
+            $resource->additional(['meta' => ['sip_password' => $result->sipPassword, 'display_once' => true]]);
+        }
+
+        return $resource->response()->setStatusCode(Response::HTTP_CREATED);
     }
 
     public function show(Organization $organization, Extension $extension): ExtensionResource

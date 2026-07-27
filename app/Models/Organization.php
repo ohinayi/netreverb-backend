@@ -64,6 +64,11 @@ class Organization extends Model
         return $this->hasMany(Extension::class);
     }
 
+    public function callQueues(): HasMany
+    {
+        return $this->hasMany(CallQueue::class);
+    }
+
     public function serviceNumbers(): HasMany
     {
         return $this->hasMany(ServiceNumber::class);

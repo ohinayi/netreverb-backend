@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
+use App\Enums\ExtensionType;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
@@ -46,6 +47,7 @@ class ExtensionPolicy
     public function viewSipRegistration(User $user, Extension $extension): bool
     {
         return $extension->user_id === $user->id
+            && in_array($extension->type, [ExtensionType::User, ExtensionType::Device], strict: true)
             && $this->activeMembership($user, $extension->organization_id) !== null;
     }
 

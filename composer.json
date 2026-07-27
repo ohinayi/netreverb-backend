@@ -47,7 +47,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:work --queue=telephony,default --tries=5 --timeout=60 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,scheduler,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"ssh -NT -i /home/abduljabbar/.ssh/netreverb-kamailio-tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:3307:127.0.0.1:3306 -L 127.0.0.1:8021:127.0.0.1:8021 -R 127.0.0.1:8001:127.0.0.1:8000 deploy@sip.classyra.com.ng\" \"php artisan queue:work --queue=telephony,recordings,default --tries=5 --timeout=60 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,logs,vite --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi @no_additional_args",
