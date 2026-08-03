@@ -46,6 +46,7 @@ class FinalizeUploadedCallRecording implements ShouldBeUnique, ShouldQueue
         }
 
         $uploadManager->completeFinalizedUpload($callLog);
+        ProcessAiAssistantCallRecording::dispatch($callLog->id)->afterCommit();
     }
 
     public function failed(?Throwable $exception): void

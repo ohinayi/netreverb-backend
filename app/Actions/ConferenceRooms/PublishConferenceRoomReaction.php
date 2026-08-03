@@ -25,7 +25,11 @@ class PublishConferenceRoomReaction
                 ->lockForUpdate()
                 ->first();
 
-            if ($participant === null || ! in_array($participant->status, [ConferenceParticipantStatus::Joined, ConferenceParticipantStatus::Invited], true)) {
+            // Presence can briefly be reported as disconnected while the
+            // FreeSWITCH media leg is still active (mobile backgrounding or a
+            // heartbeat/reconciliation race). Reactions must follow the live
+            // call state, so allow that transient status as well.
+            if ($participant === null || ! in_array($participant->status, [ConferenceParticipantStatus::Joined, ConferenceParticipantStatus::Invited, ConferenceParticipantStatus::Disconnected], true)) {
                 throw ValidationException::withMessages([
                     'participant' => 'You must be connected to the meeting before sending reactions.',
                 ]);

@@ -41,6 +41,15 @@ class UpdateOrganizationRequest extends FormRequest
                 'string',
                 Rule::in(config('telephony.call_recordings.announcement.allowed_audio_paths', [])),
             ],
+            'settings.operational_policy' => ['sometimes', 'array'],
+            'settings.operational_policy.transfers_enabled' => ['sometimes', 'boolean'],
+            'settings.operational_policy.agent_recording_enabled' => ['sometimes', 'boolean'],
+            'settings.operational_policy.supervisor_recording_access' => ['sometimes', 'boolean'],
+            'settings.operational_policy.supervisor_queue_management' => ['sometimes', 'boolean'],
+            'settings.operational_policy.recording_retention_days' => ['sometimes', 'integer', 'min:1', 'max:3650'],
+            'settings.operational_policy.campaigns_enabled' => ['sometimes', 'boolean'],
+            'settings.operational_policy.campaign_max_recipients' => ['sometimes', 'integer', 'min:1', 'max:5000'],
+            'settings.operational_policy.campaign_rate_limit_per_minute' => ['sometimes', 'integer', 'min:1', 'max:300'],
         ];
     }
 }

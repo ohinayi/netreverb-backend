@@ -30,6 +30,38 @@ class OrganizationPolicy
         return $this->canManage($user, $organization);
     }
 
+    public function manageOutboundMessaging(User $user, Organization $organization): bool
+    {
+        return $this->canManageWorkspaceFeature($user, $organization);
+    }
+
+    public function manageLeads(User $user, Organization $organization): bool
+    {
+        return $this->canManageWorkspaceFeature($user, $organization);
+    }
+
+    private function canManageWorkspaceFeature(User $user, Organization $organization): bool
+    {
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        $membership = $this->activeMembership($user, $organization);
+        if (! $membership) {
+            return false;
+        }
+
+        if ($organization->isPersonalWorkspace()) {
+            return true;
+        }
+
+        return in_array(
+            $membership->role,
+            [MembershipRole::Owner, MembershipRole::Admin],
+            strict: true,
+        );
+    }
+
     public function manageMembers(User $user, Organization $organization): bool
     {
         if ($user->isSuperAdmin()) {

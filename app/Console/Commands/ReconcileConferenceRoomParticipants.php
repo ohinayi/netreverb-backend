@@ -67,6 +67,40 @@ class ReconcileConferenceRoomParticipants extends Command
                     continue;
                 }
 
+                // The participant collection is loaded before the gateway
+                // call. A host mute can commit its moderation metadata while
+                // that call is in flight, so do not make a leave decision from
+                // the stale model instance that was loaded at the start of the
+                // reconciliation pass.
+                $participant->refresh();
+                if ($participant->status !== ConferenceParticipantStatus::Joined) {
+                    continue;
+                }
+
+                // FreeSWITCH can temporarily omit a member from xml_list while
+                // a host-level mute/vmute is being applied. More importantly,
+                // a participant who is still joined but host-muted must not be
+                // converted to `left` merely because the bridge roster no
+                // longer exposes the member's caller-id fields. The heartbeat
+                // reconciler remains responsible for detecting a real browser
+                // disconnect and will transition it to `disconnected`.
+                if ($this->isHostModerated($participant)) {
+                    $participantPresenceService->touchHeartbeat($participant);
+                    continue;
+                }
+
+                // Applying a mute/video flag can make mod_conference omit the
+                // member for a short interval. Never interpret that transient
+                // bridge gap as a leave immediately after moderation.
+                $moderation = data_get($participant->metadata, 'moderation');
+                $moderatedAt = is_array($moderation)
+                    ? ($moderation['audio_muted_at'] ?? $moderation['video_muted_at'] ?? $moderation['audio_unmuted_at'] ?? $moderation['video_unmuted_at'] ?? null)
+                    : null;
+                if (is_string($moderatedAt) && now()->diffInSeconds($moderatedAt) < 45) {
+                    $participantPresenceService->touchHeartbeat($participant);
+                    continue;
+                }
+
                 $reconcileState = $this->reconcileState($participant);
                 $nextMissCount = ($reconcileState['miss_count'] ?? 0) + 1;
 
@@ -128,5 +162,19 @@ class ReconcileConferenceRoomParticipants extends Command
                 ? $reconcileState['last_missing_at']
                 : null,
         ];
+    }
+
+    private function isHostModerated(ConferenceRoomParticipant $participant): bool
+    {
+        $moderation = is_array($participant->metadata)
+            ? ($participant->metadata['moderation'] ?? null)
+            : null;
+
+        if (! is_array($moderation)) {
+            return false;
+        }
+
+        return ($moderation['audio_muted_by_host'] ?? false) === true
+            || ($moderation['video_muted_by_host'] ?? false) === true;
     }
 }

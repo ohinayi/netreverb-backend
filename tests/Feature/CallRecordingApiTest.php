@@ -11,6 +11,7 @@ use App\Enums\CallRecordingStatus;
 use App\Enums\CallRecordingUploadStatus;
 use App\Enums\CallSessionType;
 use App\Exceptions\FreeSwitchRecordingException;
+use App\Jobs\AnnounceCallRecordingStart;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\Organization;
@@ -51,14 +52,6 @@ class CallRecordingApiTest extends TestCase
         $gateway = Mockery::mock(FreeSwitchCallGateway::class);
         $recordingPath = null;
 
-        $gateway->shouldReceive('announceRecordingStart')
-            ->once()
-            ->with(
-                'call-uuid-1234',
-                '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
-                CallRecordingAnnouncementTarget::Both->value,
-            );
-
         $gateway->shouldReceive('startRecording')
             ->once()
             ->withArgs(function (string $callUuid, string $absolutePath, CallRecordingProfile $profile) use (&$recordingPath): bool {
@@ -89,6 +82,9 @@ class CallRecordingApiTest extends TestCase
         $startResponse->assertOk()
             ->assertJsonPath('data.recording.status', CallRecordingStatus::Recording->value)
             ->assertJsonPath('data.recording.playback_available', false);
+        Bus::assertDispatched(AnnounceCallRecordingStart::class, function (AnnounceCallRecordingStart $job) use ($callLog): bool {
+            return $job->callLogId === $callLog->id && $job->callUuid === 'call-uuid-1234';
+        });
 
         $callLog->refresh();
         $recordingFilePath = $callLog->recording_file_path;

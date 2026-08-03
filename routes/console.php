@@ -44,3 +44,18 @@ Schedule::command('telephony:sync-freeswitch-call-uuids')
     ->everySecond()
     ->onOneServer()
     ->withoutOverlapping();
+
+Schedule::command('leads:dispatch-follow-up-reminders')
+    ->everyMinute()
+    ->onOneServer()
+    ->withoutOverlapping();
+
+Schedule::command('outbound:dispatch-due-campaigns')
+    ->everyMinute()
+    ->onOneServer()
+    ->withoutOverlapping();
+
+Schedule::command('payments:reconcile-sms-credit')
+    ->hourly()
+    ->onOneServer()
+    ->withoutOverlapping();

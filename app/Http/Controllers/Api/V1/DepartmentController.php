@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreDepartmentRequest;
 use App\Http\Requests\Api\V1\UpdateDepartmentRequest;
 use App\Http\Resources\Api\V1\DepartmentResource;
+use App\Enums\MembershipRole;
+use App\Enums\MembershipStatus;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Services\Auditing\AuditLogger;
@@ -23,8 +25,18 @@ class DepartmentController extends Controller
     {
         Gate::authorize('view', $organization);
 
+        $viewerMembership = request()->user()?->organizationMemberships()
+            ->where('organization_id', $organization->id)
+            ->where('status', MembershipStatus::Active->value)
+            ->first();
+
         return DepartmentResource::collection(
-            $organization->departments()->withCount('memberships')->orderBy('name')->get(),
+            $organization->departments()
+                ->when(
+                    $viewerMembership?->role === MembershipRole::Supervisor,
+                    fn ($query) => $query->whereKey($viewerMembership->department_id ?? 0),
+                )
+                ->withCount('memberships')->orderBy('name')->get(),
         );
     }
 

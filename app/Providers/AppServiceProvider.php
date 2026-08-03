@@ -2,14 +2,23 @@
 
 namespace App\Providers;
 
+use App\Contracts\Ai\AudioTranscriptionProvider;
+use App\Contracts\Ai\StructuredAssistantProvider;
+use App\Contracts\Messaging\OutboundMessageProvider;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Recordings\ConferenceRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Contracts\Telephony\FreeSwitchQueueGateway;
 use App\Contracts\Telephony\SipSubscriberGateway;
+use App\Models\CallLog;
 use App\Models\User;
+use App\Observers\CallLogObserver;
 use App\Observers\UserObserver;
+use App\Services\Ai\GeminiStructuredAssistantProvider;
+use App\Services\Ai\WhisperCppTranscriptionProvider;
+use App\Services\Messaging\DisabledOutboundMessageProvider;
+use App\Services\Messaging\EBulkSmsOutboundMessageProvider;
 use App\Services\Recordings\LocalCallRecordingStorage;
 use App\Services\Recordings\LocalConferenceRecordingStorage;
 use App\Services\Telephony\DatabaseSipSubscriberGateway;
@@ -34,6 +43,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(AudioTranscriptionProvider::class, WhisperCppTranscriptionProvider::class);
+        $this->app->bind(StructuredAssistantProvider::class, GeminiStructuredAssistantProvider::class);
+        $this->app->bind(
+            OutboundMessageProvider::class,
+            fn () => match (config('outbound.provider')) {
+                'ebulksms' => app(EBulkSmsOutboundMessageProvider::class),
+                default => app(DisabledOutboundMessageProvider::class),
+            },
+        );
         $this->app->bind(SipSubscriberGateway::class, DatabaseSipSubscriberGateway::class);
         $this->app->bind(ConferenceRecordingStorage::class, LocalConferenceRecordingStorage::class);
         $this->app->bind(CallRecordingStorage::class, LocalCallRecordingStorage::class);
@@ -56,6 +74,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Model::shouldBeStrict(! app()->isProduction());
+        CallLog::observe(CallLogObserver::class);
         User::observe(UserObserver::class);
 
         RateLimiter::for('webrtc-bootstrap', fn (Request $request): Limit => Limit::perMinute(10)

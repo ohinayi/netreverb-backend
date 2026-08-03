@@ -13,6 +13,8 @@ class SyncCallRecordingsFromVpsTest extends TestCase
 
     public function test_it_dispatches_a_recording_sync_with_defaults(): void
     {
+        config()->set('telephony.call_recordings.sync.password', null);
+
         $this->app->instance(
             CallRecordingVpsSynchronizer::class,
             tap(Mockery::mock(CallRecordingVpsSynchronizer::class), function ($mock): void {
@@ -50,6 +52,8 @@ class SyncCallRecordingsFromVpsTest extends TestCase
 
     public function test_it_passes_relative_path_and_dry_run_to_the_sync_service(): void
     {
+        config()->set('telephony.call_recordings.sync.password', null);
+
         $this->app->instance(
             CallRecordingVpsSynchronizer::class,
             tap(Mockery::mock(CallRecordingVpsSynchronizer::class), function ($mock): void {

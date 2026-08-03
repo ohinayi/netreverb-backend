@@ -11,11 +11,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_id', 'user_id', 'department_id', 'auto_assign_extension', 'invited_by', 'role', 'status', 'joined_at'])]
+#[Fillable(['organization_id', 'workspace_id', 'user_id', 'department_id', 'auto_assign_extension', 'invited_by', 'role', 'status', 'joined_at'])]
 class OrganizationMembership extends Model
 {
     /** @use HasFactory<OrganizationMembershipFactory> */
-    use HasFactory, HasUlids;
+    use BelongsToWorkspace, HasFactory, HasUlids;
 
     protected $attributes = [
         'role' => MembershipRole::Agent->value,
@@ -36,6 +36,11 @@ class OrganizationMembership extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     public function user(): BelongsTo

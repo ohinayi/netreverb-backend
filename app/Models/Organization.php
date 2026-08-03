@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
@@ -50,6 +51,11 @@ class Organization extends Model
     public function memberships(): HasMany
     {
         return $this->hasMany(OrganizationMembership::class);
+    }
+
+    public function workspaces(): HasMany
+    {
+        return $this->hasMany(Workspace::class);
     }
 
     public function users(): BelongsToMany
@@ -92,6 +98,36 @@ class Organization extends Model
     public function callLogs(): HasMany
     {
         return $this->hasMany(CallLog::class);
+    }
+
+    public function aiAssistants(): HasMany
+    {
+        return $this->hasMany(AiAssistant::class);
+    }
+
+    public function leads(): HasMany
+    {
+        return $this->hasMany(Lead::class);
+    }
+
+    public function messageTemplates(): HasMany
+    {
+        return $this->hasMany(MessageTemplate::class);
+    }
+
+    public function outboundMessages(): HasMany
+    {
+        return $this->hasMany(OutboundMessage::class);
+    }
+
+    public function smsWallet(): HasOne
+    {
+        return $this->hasOne(SmsWallet::class);
+    }
+
+    public function smsCreditPurchases(): HasMany
+    {
+        return $this->hasMany(SmsCreditPurchase::class);
     }
 
     /**
@@ -140,6 +176,58 @@ class Organization extends Model
     }
 
     /**
+     * Organization-controlled operational policy with conservative bounds.
+     *
+     * @return array{
+     *     transfers_enabled: bool,
+     *     agent_recording_enabled: bool,
+     *     supervisor_recording_access: bool,
+     *     supervisor_queue_management: bool,
+     *     recording_retention_days: int,
+     *     campaigns_enabled: bool,
+     *     campaign_max_recipients: int,
+     *     campaign_rate_limit_per_minute: int
+     * }
+     */
+    public function operationalPolicy(): array
+    {
+        $settings = is_array($this->settings) ? $this->settings : [];
+        $policy = $settings['operational_policy'] ?? [];
+        $policy = is_array($policy) ? $policy : [];
+
+        return [
+            'transfers_enabled' => (bool) ($policy['transfers_enabled'] ?? true),
+            'agent_recording_enabled' => (bool) ($policy['agent_recording_enabled'] ?? true),
+            'supervisor_recording_access' => (bool) ($policy['supervisor_recording_access'] ?? true),
+            'supervisor_queue_management' => (bool) ($policy['supervisor_queue_management'] ?? true),
+            'recording_retention_days' => min(3650, max(
+                1,
+                (int) ($policy['recording_retention_days']
+                    ?? config('telephony.call_recordings.retention_days', 30)),
+            )),
+            'campaigns_enabled' => (bool) ($policy['campaigns_enabled'] ?? true),
+            'campaign_max_recipients' => min(5000, max(
+                1,
+                (int) ($policy['campaign_max_recipients'] ?? 5000),
+            )),
+            'campaign_rate_limit_per_minute' => min(300, max(
+                1,
+                (int) ($policy['campaign_rate_limit_per_minute'] ?? 60),
+            )),
+        ];
+    }
+
+    public function policyAllows(string $capability): bool
+    {
+        return (bool) ($this->operationalPolicy()[$capability] ?? false);
+    }
+
+    public function recordingRetentionDays(): int
+    {
+        return $this->operationalPolicy()['recording_retention_days'];
+    }
+
+    /**
      * Individual users retain a private workspace so existing extensions,
      * call logs and SIP provisioning continue to have a tenant boundary. It
      * must not expose organization administration capabilities.
@@ -153,6 +241,10 @@ class Organization extends Model
 
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
+        if ($user->isSuperAdmin()) {
+            return $query;
+        }
+
         return $query->whereHas(
             'memberships',
             fn (Builder $membershipQuery): Builder => $membershipQuery

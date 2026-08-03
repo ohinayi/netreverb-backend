@@ -252,6 +252,17 @@ class ConferenceRoomController extends Controller
         $conferenceRoom = $this->ensureConferenceRoomAvailable($conferenceRoom);
         $participant = $this->resolveCurrentUserParticipant($conferenceRoom, $request->user());
 
+        // A live SIP/WebRTC leg may outlast a missed browser heartbeat. Allow
+        // that participant to recover to Joined on the next heartbeat instead
+        // of leaving reactions, chat, and moderation locked out while media
+        // is still flowing.
+        if ($participant->status === ConferenceParticipantStatus::Disconnected) {
+            $participant->forceFill([
+                'status' => ConferenceParticipantStatus::Joined,
+                'left_at' => null,
+            ])->save();
+        }
+
         if ($participant->status !== ConferenceParticipantStatus::Joined) {
             throw ValidationException::withMessages([
                 'conference_room' => 'You are not an active participant in this meeting.',
@@ -699,7 +710,15 @@ class ConferenceRoomController extends Controller
 
         return in_array(
             $participant?->status,
-            [ConferenceParticipantStatus::Invited, ConferenceParticipantStatus::Joined],
+            [
+                ConferenceParticipantStatus::Invited,
+                ConferenceParticipantStatus::Joined,
+                // A temporary heartbeat/SIP reconciliation miss must not hide
+                // the rest of the room from a participant whose media leg is
+                // still active. Disconnected participants can reconnect and
+                // should retain roster visibility while doing so.
+                ConferenceParticipantStatus::Disconnected,
+            ],
             true,
         );
     }
@@ -734,7 +753,11 @@ class ConferenceRoomController extends Controller
     {
         return in_array(
             $participant?->status,
-            [ConferenceParticipantStatus::Invited, ConferenceParticipantStatus::Joined],
+            [
+                ConferenceParticipantStatus::Invited,
+                ConferenceParticipantStatus::Joined,
+                ConferenceParticipantStatus::Disconnected,
+            ],
             true,
         );
     }

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['organization_id', 'realm', 'number', 'type'])]
+#[Fillable(['organization_id', 'workspace_id', 'realm', 'number', 'type'])]
 class DialableNumber extends Model
 {
     /** @use HasFactory<DialableNumberFactory> */

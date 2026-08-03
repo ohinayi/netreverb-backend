@@ -112,6 +112,67 @@ class OrganizationApiTest extends TestCase
         ], $organization->settings);
     }
 
+    public function test_operational_policy_is_normalized_and_partial_settings_updates_are_merged(): void
+    {
+        $organization = Organization::factory()->create([
+            'settings' => [
+                'kind' => 'organization',
+                'call_recording_announcement' => [
+                    'enabled' => true,
+                    'target' => CallRecordingAnnouncementTarget::Both->value,
+                ],
+            ],
+        ]);
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+
+        Sanctum::actingAs($admin);
+
+        $this->patchJson("/api/v1/organizations/{$organization->public_id}", [
+            'settings' => [
+                'operational_policy' => [
+                    'transfers_enabled' => false,
+                    'recording_retention_days' => 120,
+                    'campaign_max_recipients' => 250,
+                    'campaign_rate_limit_per_minute' => 20,
+                ],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.settings.kind', 'organization')
+            ->assertJsonPath('data.settings.call_recording_announcement.enabled', true)
+            ->assertJsonPath('data.operational_policy.transfers_enabled', false)
+            ->assertJsonPath('data.operational_policy.recording_retention_days', 120)
+            ->assertJsonPath('data.operational_policy.campaign_max_recipients', 250)
+            ->assertJsonPath('data.operational_policy.campaign_rate_limit_per_minute', 20)
+            ->assertJsonPath('data.operational_policy.agent_recording_enabled', true)
+            ->assertJsonPath('data.membership_role', MembershipRole::Admin->value)
+            ->assertJsonPath('data.members_count', 1);
+    }
+
+    public function test_operational_policy_rejects_unsafe_limits(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+
+        Sanctum::actingAs($admin);
+
+        $this->patchJson("/api/v1/organizations/{$organization->public_id}", [
+            'settings' => [
+                'operational_policy' => [
+                    'recording_retention_days' => 0,
+                    'campaign_max_recipients' => 5001,
+                    'campaign_rate_limit_per_minute' => 301,
+                ],
+            ],
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'settings.operational_policy.recording_retention_days',
+                'settings.operational_policy.campaign_max_recipients',
+                'settings.operational_policy.campaign_rate_limit_per_minute',
+            ]);
+    }
+
     public function test_admin_can_create_a_department_but_member_cannot(): void
     {
         $organization = Organization::factory()->create();

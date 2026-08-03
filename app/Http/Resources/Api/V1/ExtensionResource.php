@@ -22,6 +22,13 @@ class ExtensionResource extends JsonResource
             'display_name' => $this->display_name,
             'type' => $this->type,
             'status' => $this->status,
+            // Returned for a user's own assigned extension so the browser can
+            // persist call activity even while the workspace switcher is still
+            // loading after sign-in. Do not lazy-load this relationship.
+            'organization_id' => $this->whenLoaded(
+                'organization',
+                fn (): ?string => $this->organization?->public_id,
+            ),
             // Resources must not trigger hidden relationship queries. Some
             // callers only need extension metadata (for example call logs).
             'user_id' => $this->whenLoaded('user', fn (): ?string => $this->user?->public_id),

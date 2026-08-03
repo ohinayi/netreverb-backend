@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'organization_id',
+    'organization_id', 'workspace_id',
     'dialable_number_id',
     'name',
     'type',
@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class ServiceNumber extends Model
 {
     /** @use HasFactory<ServiceNumberFactory> */
-    use HasFactory, HasUlids, SoftDeletes;
+    use BelongsToWorkspace, HasFactory, HasUlids, SoftDeletes;
 
     protected $attributes = [
         'enabled' => true,

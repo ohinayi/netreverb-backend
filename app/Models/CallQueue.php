@@ -9,12 +9,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'organization_id', 'department_id', 'extension_id', 'strategy', 'agent_ring_timeout_seconds',
+    'organization_id', 'workspace_id', 'department_id', 'extension_id', 'strategy', 'agent_ring_timeout_seconds',
     'max_wait_seconds', 'empty_queue_action', 'fallback_extension_id', 'enabled',
 ])]
 class CallQueue extends Model
 {
-    use HasUlids;
+    use BelongsToWorkspace, HasUlids;
 
     public function uniqueIds(): array
     {

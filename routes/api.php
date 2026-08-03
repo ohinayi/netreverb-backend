@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AiAssistantController;
 use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
@@ -17,13 +18,23 @@ use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\ExtensionController;
 use App\Http\Controllers\Api\V1\FriendshipController;
+use App\Http\Controllers\Api\V1\LeadController;
+use App\Http\Controllers\Api\V1\LeadFollowUpController;
 use App\Http\Controllers\Api\V1\MessageController;
+use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\OutboundCampaignController;
+use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
+use App\Http\Controllers\Api\V1\OutboundMessagingController;
+use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
+use App\Http\Controllers\Api\V1\SmsWalletController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
+use App\Http\Controllers\Api\V1\SuperAdminSmsController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
+use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
@@ -33,6 +44,12 @@ Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterC
     ->name('freeswitch.callcenter.configuration');
 
 Route::prefix('v1')->group(function (): void {
+    Route::post('payments/webhooks/{provider}', PaymentWebhookController::class)
+        ->middleware('throttle:240,1')
+        ->name('payments.webhooks');
+    Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
+        ->middleware('throttle:120,1')
+        ->name('outbound.webhooks.delivery');
     Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:auth-registration');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
         ->middleware('throttle:auth-login');
@@ -49,7 +66,11 @@ Route::prefix('v1')->group(function (): void {
 
     Route::middleware(['auth:sanctum', 'throttle:120,1'])->group(function (): void {
         Route::get('/me', fn (Request $request) => UserResource::make(
-            $request->user()->load(['extensions.dialableNumber', 'extensions.provisioningState']),
+            $request->user()->load([
+                'extensions.dialableNumber',
+                'extensions.organization',
+                'extensions.provisioningState',
+            ]),
         ));
         Route::delete('auth/logout', [AuthenticatedSessionController::class, 'destroy']);
         Route::post('email/verification-notification', EmailVerificationNotificationController::class)
@@ -57,8 +78,22 @@ Route::prefix('v1')->group(function (): void {
             ->name('verification.send');
 
         Route::middleware('verified')->group(function (): void {
+            Route::get('notifications', [NotificationController::class, 'index'])
+                ->name('notifications.index');
+            Route::patch('notifications/read-all', [NotificationController::class, 'readAll'])
+                ->name('notifications.read-all');
+            Route::patch('notifications/{notification}/read', [NotificationController::class, 'read'])
+                ->name('notifications.read');
             Route::get('super-admin/analytics', SuperAdminAnalyticsController::class)
                 ->name('super-admin.analytics');
+            Route::get('super-admin/sms', [SuperAdminSmsController::class, 'index'])
+                ->name('super-admin.sms.index');
+            Route::patch('super-admin/sms/pricing', [SuperAdminSmsController::class, 'updatePricing'])
+                ->name('super-admin.sms.pricing.update');
+            Route::post(
+                'super-admin/sms/purchases/{smsCreditPurchase}/complete',
+                [SuperAdminSmsController::class, 'completePurchase'],
+            )->name('super-admin.sms.purchases.complete');
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');
@@ -76,6 +111,10 @@ Route::prefix('v1')->group(function (): void {
                 ->name('conference-rooms.chat.messages.store');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
+            Route::apiResource('organizations.workspaces', WorkspaceController::class)
+                ->except(['create', 'edit'])
+                ->parameters(['workspaces' => 'workspace']);
+            Route::get('leads', [LeadController::class, 'all'])->name('leads.index');
             Route::get('people/search', [FriendshipController::class, 'search']);
             Route::apiResource('friendships', FriendshipController::class)->only(['index', 'store', 'show']);
             Route::post('friendships/{friendship}/respond', [FriendshipController::class, 'update'])
@@ -101,6 +140,58 @@ Route::prefix('v1')->group(function (): void {
                 Route::apiResource('organizations.call-queues', CallQueueController::class)
                     ->only(['index', 'store', 'update', 'destroy'])
                     ->parameters(['call-queues' => 'callQueue']);
+                Route::apiResource('organizations.leads', LeadController::class)
+                    ->only(['index', 'store', 'update', 'destroy']);
+                Route::get('organizations/{organization}/leads/{lead}/activities', [LeadController::class, 'activities'])
+                    ->name('organizations.leads.activities.index');
+                Route::post('organizations/{organization}/leads/{lead}/activities', [LeadController::class, 'storeActivity'])
+                    ->name('organizations.leads.activities.store');
+                Route::post('organizations/{organization}/leads/{lead}/follow-up/complete', [LeadFollowUpController::class, 'complete'])
+                    ->name('organizations.leads.follow-up.complete');
+                Route::post('organizations/{organization}/leads/{lead}/follow-up/snooze', [LeadFollowUpController::class, 'snooze'])
+                    ->name('organizations.leads.follow-up.snooze');
+                Route::get('organizations/{organization}/outbound-messaging', [OutboundMessagingController::class, 'index'])
+                    ->name('organizations.outbound-messaging.index');
+                Route::get('organizations/{organization}/sms-wallet', [SmsWalletController::class, 'show'])
+                    ->name('organizations.sms-wallet.show');
+                Route::post('organizations/{organization}/sms-wallet/purchases', [SmsWalletController::class, 'requestPurchase'])
+                    ->middleware('throttle:10,1')
+                    ->name('organizations.sms-wallet.purchases.store');
+                Route::post(
+                    'organizations/{organization}/sms-wallet/purchases/{smsCreditPurchase}/verify',
+                    [SmsWalletController::class, 'verifyPurchase'],
+                // Verification is idempotent. Keep abuse protection, but allow
+                // a user to retry after provider settlement without immediately
+                // hitting the normal purchase-creation limiter.
+                )->middleware('throttle:30,1')->name('organizations.sms-wallet.purchases.verify');
+                Route::post('organizations/{organization}/message-templates', [OutboundMessagingController::class, 'storeTemplate'])
+                    ->name('organizations.message-templates.store');
+                Route::post('organizations/{organization}/message-templates/{messageTemplate}/review', [OutboundMessagingController::class, 'reviewTemplate'])
+                    ->name('organizations.message-templates.review');
+                Route::put('organizations/{organization}/leads/{lead}/contact-channel', [OutboundMessagingController::class, 'updateContactChannel'])
+                    ->name('organizations.leads.contact-channel.update');
+                Route::post('organizations/{organization}/outbound-messages', [OutboundMessagingController::class, 'createDraft'])
+                    ->name('organizations.outbound-messages.store');
+                Route::post('organizations/{organization}/outbound-messages/{outboundMessage}/approve', [OutboundMessagingController::class, 'approve'])
+                    ->name('organizations.outbound-messages.approve');
+                Route::get('organizations/{organization}/outbound-campaigns', [OutboundCampaignController::class, 'index'])
+                    ->name('organizations.outbound-campaigns.index');
+                Route::post('organizations/{organization}/outbound-campaigns', [OutboundCampaignController::class, 'store'])
+                    ->name('organizations.outbound-campaigns.store');
+                Route::post('organizations/{organization}/outbound-campaigns/{outboundCampaign}/start', [OutboundCampaignController::class, 'start'])
+                    ->name('organizations.outbound-campaigns.start');
+                Route::post('organizations/{organization}/outbound-campaigns/{outboundCampaign}/cancel', [OutboundCampaignController::class, 'cancel'])
+                    ->name('organizations.outbound-campaigns.cancel');
+                Route::get('organizations/{organization}/leads-export', [LeadController::class, 'export'])
+                    ->name('organizations.leads.export');
+                Route::post('organizations/{organization}/leads-import', [LeadController::class, 'import'])
+                    ->middleware('throttle:10,1')
+                    ->name('organizations.leads.import');
+                Route::apiResource('organizations.ai-assistants', AiAssistantController::class)
+                    ->only(['index', 'store', 'update', 'destroy'])
+                    ->parameters(['ai-assistants' => 'aiAssistant']);
+                Route::get('organizations/{organization}/ai-assistants/{aiAssistant}/sessions', [AiAssistantController::class, 'sessions'])
+                    ->name('organizations.ai-assistants.sessions.index');
                 Route::apiResource('organizations.departments', DepartmentController::class)
                     ->only(['index', 'store', 'update']);
                 Route::get('organizations/{organization}/members', [OrganizationController::class, 'members'])

@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'organization_id',
+    'organization_id', 'workspace_id',
     'caller_extension_id',
     'callee_extension_id',
     'caller_number',
@@ -45,7 +45,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class CallLog extends Model
 {
     /** @use HasFactory<CallLogFactory> */
-    use HasFactory, HasUlids, SoftDeletes;
+    use BelongsToWorkspace, HasFactory, HasUlids, SoftDeletes;
 
     protected $attributes = [
         'status' => CallStatus::Ringing->value,

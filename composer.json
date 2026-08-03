@@ -47,7 +47,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"ssh -NT -i /home/abduljabbar/.ssh/netreverb-kamailio-tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:3307:127.0.0.1:3306 -L 127.0.0.1:8021:127.0.0.1:8021 -R 127.0.0.1:8001:127.0.0.1:8000 deploy@sip.classyra.com.ng\" \"php artisan queue:work --queue=telephony,recordings,default --tries=5 --timeout=60 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"sh -c 'while true; do ssh -NT -i /home/abduljabbar/.ssh/netreverb-kamailio-tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o ConnectTimeout=15 -L 127.0.0.1:3307:127.0.0.1:3306 -L 127.0.0.1:8021:127.0.0.1:8021 -L 127.0.0.1:18081:127.0.0.1:8081 -R 127.0.0.1:8001:127.0.0.1:8000 deploy@sip.classyra.com.ng; printf %s\\n Tunnel-disconnected-retrying-in-5-seconds; sleep 5; done'\" \"php artisan queue:work --queue=telephony,recordings,ai,outbound,payments,default --tries=5 --timeout=300 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,logs,vite --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi @no_additional_args",

@@ -204,7 +204,13 @@ class CallQueueController extends Controller
         if (in_array($membership?->role, [MembershipRole::Owner, MembershipRole::Admin, MembershipRole::TelephonyAdmin], true)) {
             return;
         }
-        abort_unless($membership?->role === MembershipRole::Supervisor && $membership->department_id !== null && $queue?->department_id === $membership->department_id, 403);
+        abort_unless(
+            $organization->policyAllows('supervisor_queue_management')
+                && $membership?->role === MembershipRole::Supervisor
+                && $membership->department_id !== null
+                && $queue?->department_id === $membership->department_id,
+            403,
+        );
     }
 
     private function queueMembership(User $user, Organization $organization): ?OrganizationMembership

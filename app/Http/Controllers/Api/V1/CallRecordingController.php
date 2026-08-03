@@ -33,7 +33,7 @@ class CallRecordingController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): CallLogResource {
-        Gate::authorize('update', $callLog);
+        Gate::authorize('record', $callLog);
 
         $callUuid = $request->string('recording_uuid')->toString();
 
@@ -89,7 +89,7 @@ class CallRecordingController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): CallLogResource {
-        Gate::authorize('update', $callLog);
+        Gate::authorize('record', $callLog);
 
         $this->recordingManager->stop($callLog);
 
@@ -109,7 +109,7 @@ class CallRecordingController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): CallLogResource {
-        Gate::authorize('update', $callLog);
+        Gate::authorize('record', $callLog);
 
         $this->uploadManager->appendChunk(
             $callLog,
@@ -133,7 +133,7 @@ class CallRecordingController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): CallLogResource {
-        Gate::authorize('update', $callLog);
+        Gate::authorize('record', $callLog);
 
         $this->uploadManager->finalize(
             $callLog,
@@ -156,7 +156,7 @@ class CallRecordingController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): BinaryFileResponse {
-        Gate::authorize('view', $callLog);
+        Gate::authorize('viewRecording', $callLog);
 
         if ($callLog->recording_file_path === null || $callLog->recording_file_path === '') {
             abort(404);
@@ -190,12 +190,20 @@ class CallRecordingController extends Controller
     }
 
     public function destroy(
+        Request $request,
         Organization $organization,
         CallLog $callLog,
     ): JsonResponse {
-        Gate::authorize('update', $callLog);
+        Gate::authorize('deleteRecording', $callLog);
 
         $this->recordingManager->delete($callLog);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'call.recording.deleted',
+            $callLog,
+        );
 
         return response()->json([
             'message' => 'Call recording deleted.',

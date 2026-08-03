@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'organization_id',
+    'organization_id', 'workspace_id',
     'host_user_id',
     'room_id',
     'invite_code',
@@ -31,7 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ConferenceRoom extends Model
 {
     /** @use HasFactory<ConferenceRoomFactory> */
-    use HasFactory, HasUlids;
+    use BelongsToWorkspace, HasFactory, HasUlids;
 
     protected $attributes = [
         'status' => ConferenceRoomStatus::Active->value,

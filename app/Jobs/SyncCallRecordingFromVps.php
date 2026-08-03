@@ -90,6 +90,8 @@ class SyncCallRecordingFromVps implements ShouldQueue
                 'recording_size' => $size,
             ])->save();
         }
+
+        ProcessAiAssistantCallRecording::dispatch($callLog->id)->afterCommit();
     }
 
     public function failed(?Throwable $exception): void

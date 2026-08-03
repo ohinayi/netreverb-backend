@@ -10,6 +10,7 @@ use App\Enums\CallRecordingStatus;
 use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Exceptions\FreeSwitchRecordingException;
+use App\Jobs\AnnounceCallRecordingStart;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
 use App\Models\CallRecordingUpload;
@@ -74,8 +75,6 @@ class CallRecordingManager
                 $audioProfile = $this->clientVideoAudioProfileFor($callLog);
                 $audioAbsolutePath = $this->directVideoRecordingMuxer->audioSidecarAbsolutePath($callLog);
                 $this->storage->ensureDirectoryExists($this->directVideoRecordingMuxer->audioSidecarRelativePath($callLog));
-                $this->announceRecordingStart($callLog, $callUuid);
-
                 Log::info('Starting direct video call server audio sidecar recording.', [
                     'call_log_id' => $callLog->id,
                     'public_id' => $callLog->public_id,
@@ -90,11 +89,10 @@ class CallRecordingManager
                 $callLog->forceFill([
                     'recording_status' => CallRecordingStatus::Recording,
                 ])->save();
+                $this->dispatcher->dispatch(new AnnounceCallRecordingStart($callLog->id, $callUuid));
 
                 return $callLog->refresh();
             }
-
-            $this->announceRecordingStart($callLog, $callUuid);
 
             Log::info('Starting FreeSWITCH call recording.', [
                 'call_log_id' => $callLog->id,
@@ -110,6 +108,7 @@ class CallRecordingManager
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Recording,
             ])->save();
+            $this->dispatcher->dispatch(new AnnounceCallRecordingStart($callLog->id, $callUuid));
         } catch (Throwable $exception) {
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Failed,
@@ -129,7 +128,7 @@ class CallRecordingManager
         return $callLog->refresh();
     }
 
-    private function announceRecordingStart(CallLog $callLog, string $callUuid): void
+    public function announceStart(CallLog $callLog, string $callUuid): void
     {
         $organization = $callLog->organization;
 
@@ -373,15 +372,18 @@ class CallRecordingManager
 
     public function cleanup(int $retentionDays): int
     {
-        $cutoff = now()->subDays(max(1, $retentionDays));
         $deletedCount = 0;
 
         CallLog::query()
+            ->with('organization')
             ->whereNotNull('recording_file_path')
             ->whereNull('deleted_at')
             ->oldest('id')
-            ->chunkById(100, function ($callLogs) use ($cutoff, &$deletedCount): void {
+            ->chunkById(100, function ($callLogs) use ($retentionDays, &$deletedCount): void {
                 foreach ($callLogs as $callLog) {
+                    $effectiveRetentionDays = $callLog->organization?->recordingRetentionDays()
+                        ?? max(1, $retentionDays);
+                    $cutoff = now()->subDays($effectiveRetentionDays);
                     $shouldDelete = false;
 
                     if (! $this->storage->exists($callLog)) {

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'organization_id',
+    'workspace_id',
     'name',
     'slug',
     'description',
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Department extends Model
 {
     /** @use HasFactory<DepartmentFactory> */
-    use HasFactory, HasUlids;
+    use BelongsToWorkspace, HasFactory, HasUlids;
 
     public function uniqueIds(): array
     {
@@ -35,6 +36,11 @@ class Department extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     public function memberships(): HasMany

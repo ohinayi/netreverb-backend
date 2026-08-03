@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'organization_id',
+    'organization_id', 'workspace_id',
     'call_log_id',
     'recording_id',
     'status',
@@ -32,7 +32,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class CallRecordingUpload extends Model
 {
     /** @use HasFactory<CallRecordingUploadFactory> */
-    use HasFactory, HasUlids;
+    use BelongsToWorkspace, HasFactory, HasUlids;
 
     public function uniqueIds(): array
     {

@@ -19,6 +19,15 @@ class AuthenticationApiTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Browser authentication is session-cookie based. Mark these requests
+        // as first-party so Sanctum installs the session middleware stack.
+        $this->withHeader('Origin', 'http://localhost:5174');
+    }
+
     public function test_registration_creates_an_unverified_user_and_individual_workspace(): void
     {
         Notification::fake();
@@ -103,6 +112,7 @@ class AuthenticationApiTest extends TestCase
         $this->postJson('/api/v1/auth/register', array_merge($this->registrationPayload(), [
             'account_type' => 'community',
             'workspace_name' => 'North Clinic',
+            'assign_extension' => true,
         ]));
         $user = User::query()->sole();
         $verificationUrl = URL::temporarySignedRoute(
@@ -158,7 +168,13 @@ class AuthenticationApiTest extends TestCase
     {
         $user = User::factory()->create();
 
-        $this->actingAs($user)->deleteJson('/api/v1/auth/logout')->assertNoContent();
+        $this->postJson('/api/v1/auth/login', [
+            'email' => $user->email,
+            'password' => 'password',
+            'device_name' => 'browser',
+        ])->assertOk();
+
+        $this->deleteJson('/api/v1/auth/logout')->assertNoContent();
         $this->getJson('/api/v1/me')->assertUnauthorized();
     }
 

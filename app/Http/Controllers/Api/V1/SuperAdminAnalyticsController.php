@@ -5,14 +5,21 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\CallLog;
 use App\Models\Organization;
+use App\Models\SipProvisioningState;
 use App\Models\User;
+use App\Services\Messaging\OutboundMessagingReadiness;
+use App\Services\Payments\PaymentGatewayService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class SuperAdminAnalyticsController extends Controller
 {
+    public function __construct(
+        private readonly OutboundMessagingReadiness $messagingReadiness,
+        private readonly PaymentGatewayService $payments,
+    ) {}
+
     /**
      * Platform-wide operational overview. This deliberately exposes counts and
      * aggregates only; individual call details stay behind organization policies.
@@ -25,8 +32,8 @@ class SuperAdminAnalyticsController extends Controller
         $to = now()->endOfDay();
         $dialect = DB::getDriverName();
         $dateExpression = $dialect === 'sqlite'
-            ? "date(started_at)"
-            : "DATE(started_at)";
+            ? 'date(started_at)'
+            : 'DATE(started_at)';
 
         $daily = CallLog::query()
             ->whereBetween('started_at', [$from, $to])
@@ -75,6 +82,28 @@ class SuperAdminAnalyticsController extends Controller
                 ],
                 'activity' => $activity->values(),
                 'organizations' => $organizationUsage->values(),
+                'health' => [
+                    'queue' => [
+                        'pending_jobs' => (int) DB::table('jobs')->count(),
+                        'failed_jobs' => (int) DB::table('failed_jobs')->count(),
+                    ],
+                    'provisioning' => [
+                        'failed' => SipProvisioningState::query()->where('status', 'failed')->count(),
+                        'stale_pending' => SipProvisioningState::query()
+                            ->where('status', 'pending')
+                            ->where('updated_at', '<', now()->subMinutes(15))
+                            ->count(),
+                    ],
+                    'recordings' => [
+                        'failed' => CallLog::query()->where('recording_status', 'failed')->count(),
+                        'orphaned' => CallLog::query()->where('recording_status', 'orphaned')->count(),
+                    ],
+                    'outbound_messaging' => $this->messagingReadiness->status(),
+                    'payments' => [
+                        'enabled' => $this->payments->enabled(),
+                        'gateways' => $this->payments->readiness(),
+                    ],
+                ],
             ],
         ]);
     }

@@ -15,13 +15,13 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'organization_id', 'dialable_number_id', 'user_id', 'display_name', 'type', 'status',
+    'organization_id', 'workspace_id', 'dialable_number_id', 'user_id', 'display_name', 'type', 'status',
     'unavailable_action', 'fallback_extension_id', 'ring_timeout_seconds',
 ])]
 class Extension extends Model
 {
     /** @use HasFactory<ExtensionFactory> */
-    use HasFactory, HasUlids, SoftDeletes;
+    use BelongsToWorkspace, HasFactory, HasUlids, SoftDeletes;
 
     protected $attributes = [
         'type' => ExtensionType::User->value,
@@ -41,6 +41,11 @@ class Extension extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     public function dialableNumber(): BelongsTo

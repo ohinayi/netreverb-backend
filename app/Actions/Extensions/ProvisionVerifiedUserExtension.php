@@ -2,7 +2,6 @@
 
 namespace App\Actions\Extensions;
 
-use App\Enums\ExtensionProvisioningMode;
 use App\Enums\ExtensionType;
 use App\Enums\MembershipStatus;
 use App\Models\Extension;
@@ -31,8 +30,6 @@ class ProvisionVerifiedUserExtension
                 ->whereBelongsTo($lockedUser)
                 ->where('status', MembershipStatus::Active->value)
                 ->where('auto_assign_extension', true)
-                ->whereHas('organization', fn ($query) => $query
-                    ->where('extension_provisioning_mode', ExtensionProvisioningMode::Automatic->value))
                 ->oldest('id')
                 ->get();
 

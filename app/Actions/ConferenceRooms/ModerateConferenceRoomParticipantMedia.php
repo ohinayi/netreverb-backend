@@ -166,6 +166,10 @@ class ModerateConferenceRoomParticipantMedia
             fn (): null => $command($conferenceRoom->sip_number, $liveMember['member_id']),
         );
 
+        // A media moderation command must never change conference presence.
+        // The bridge can briefly omit a member while applying mute/video flags;
+        // preserve the joined status and reset any stale reconciliation misses.
+
         return DB::transaction(function () use ($participant, $updateModeration): ConferenceRoomParticipant {
             $participant = ConferenceRoomParticipant::query()
                 ->with('user')
@@ -175,6 +179,10 @@ class ModerateConferenceRoomParticipantMedia
             $metadata = $participant->metadata ?? [];
             $moderation = is_array($metadata['moderation'] ?? null) ? $metadata['moderation'] : [];
             $metadata['moderation'] = $updateModeration($moderation);
+            $metadata['presence_reconcile'] = [
+                'miss_count' => 0,
+                'last_missing_at' => null,
+            ];
 
             $participant->forceFill([
                 'metadata' => $metadata,

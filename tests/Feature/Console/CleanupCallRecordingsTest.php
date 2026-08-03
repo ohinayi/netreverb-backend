@@ -60,4 +60,33 @@ class CleanupCallRecordingsTest extends TestCase
         $this->assertNull($oldCompleted->recording_file_path);
         $this->assertNull($missingRecording->recording_file_path);
     }
+
+    public function test_cleanup_honors_each_organization_recording_retention_policy(): void
+    {
+        Storage::fake('freeswitch_call_recordings');
+
+        $organization = Organization::factory()->create([
+            'settings' => [
+                'operational_policy' => ['recording_retention_days' => 90],
+            ],
+        ]);
+        $recording = CallLog::factory()->for($organization)->create([
+            'recording_id' => (string) Str::ulid(),
+            'recording_uuid' => 'retained-call-uuid',
+            'recording_file_path' => '2026/05/01/retained.wav',
+            'recording_file_name' => 'retained.wav',
+            'recording_status' => CallRecordingStatus::Completed,
+            'recording_started_at' => now()->subDays(45),
+            'recording_ended_at' => now()->subDays(45),
+            'created_at' => now()->subDays(45),
+            'updated_at' => now()->subDays(45),
+        ]);
+        Storage::disk('freeswitch_call_recordings')->put($recording->recording_file_path, 'fake audio');
+
+        $this->app->make(CleanupCallRecordings::class)
+            ->handle($this->app->make(CallRecordingManager::class));
+
+        Storage::disk('freeswitch_call_recordings')->assertExists($recording->recording_file_path);
+        $this->assertSame(CallRecordingStatus::Completed, $recording->refresh()->recording_status);
+    }
 }

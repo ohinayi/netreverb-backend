@@ -19,6 +19,7 @@ class UpdateOrganizationMemberRequest extends FormRequest
             'department_public_id' => ['sometimes', 'nullable', 'string', 'exists:departments,public_id'],
             'role' => ['sometimes', 'string', 'in:admin,supervisor,agent'],
             'status' => ['sometimes', 'string', 'in:invited,active,suspended'],
+            'assign_extension' => ['sometimes', 'boolean'],
         ];
     }
 }

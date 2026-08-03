@@ -67,9 +67,14 @@ class ExtensionPolicy
             return true;
         }
 
-        // Individual accounts may use their provisioned extension, but only an
-        // organization account may administer tenant-wide SIP identities.
-        if ($user->isIndividualAccount()) {
+        $organizationModel = $organization instanceof Organization
+            ? $organization
+            : Organization::query()->find($organization);
+
+        // An individual's private workspace is not an administration tenant.
+        // The same person may still administer a real organization when an
+        // explicit owner/admin membership grants that authority.
+        if ($organizationModel?->isPersonalWorkspace()) {
             return false;
         }
 

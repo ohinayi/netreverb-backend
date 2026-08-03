@@ -57,6 +57,33 @@ class CallLogPolicy
 
     public function transfer(User $user, CallLog $callLog): bool
     {
+        return $this->organizationPolicyAllows($callLog, 'transfers_enabled')
+            && $this->canManage($user, $callLog->organization_id);
+    }
+
+    public function record(User $user, CallLog $callLog): bool
+    {
+        if (! $this->organizationPolicyAllows($callLog, 'agent_recording_enabled')) {
+            return $this->canManage($user, $callLog->organization_id);
+        }
+
+        return $this->update($user, $callLog);
+    }
+
+    public function viewRecording(User $user, CallLog $callLog): bool
+    {
+        if (! $this->view($user, $callLog)) {
+            return false;
+        }
+
+        $membership = $this->activeMembership($user, $callLog->organization_id);
+
+        return $membership?->role !== MembershipRole::Supervisor
+            || $this->organizationPolicyAllows($callLog, 'supervisor_recording_access');
+    }
+
+    public function deleteRecording(User $user, CallLog $callLog): bool
+    {
         return $this->canManage($user, $callLog->organization_id);
     }
 
@@ -106,5 +133,12 @@ class CallLogPolicy
             ->whereBelongsTo($user)
             ->where('status', MembershipStatus::Active->value)
             ->first();
+    }
+
+    private function organizationPolicyAllows(CallLog $callLog, string $capability): bool
+    {
+        $callLog->loadMissing('organization');
+
+        return $callLog->organization?->policyAllows($capability) ?? false;
     }
 }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Organizations\AddOrganizationMember;
 use App\Actions\Organizations\CreateOrganization;
 use App\Actions\Organizations\SyncOrganizationMemberFriendships;
+use App\Actions\Extensions\ProvisionVerifiedUserExtension;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
@@ -30,6 +31,7 @@ class OrganizationController extends Controller
         private CreateOrganization $createOrganization,
         private AddOrganizationMember $addOrganizationMember,
         private SyncOrganizationMemberFriendships $syncFriendships,
+        private ProvisionVerifiedUserExtension $provisionExtension,
         private AuditLogger $auditLogger,
     ) {}
 
@@ -41,8 +43,9 @@ class OrganizationController extends Controller
             ->visibleTo($request->user())
             ->with([
                 'memberships' => fn ($query) => $query->whereBelongsTo($request->user()),
+                'workspaces' => fn ($query) => $query->where('status', 'active')->withCount(['memberships', 'departments']),
             ])
-            ->withCount(['memberships', 'extensions'])
+            ->withCount($this->operationalCounts())
             ->latest()
             ->paginate(20);
 
@@ -52,9 +55,10 @@ class OrganizationController extends Controller
     public function store(StoreOrganizationRequest $request): JsonResponse
     {
         Gate::authorize('create', Organization::class);
+        $organization = $this->createOrganization->execute($request->user(), $request->validated());
 
         return OrganizationResource::make(
-            $this->createOrganization->execute($request->user(), $request->validated()),
+            $this->loadOperationalContext($organization, $request),
         )->response()->setStatusCode(Response::HTTP_CREATED);
     }
 
@@ -64,7 +68,8 @@ class OrganizationController extends Controller
 
         return OrganizationResource::make($organization->load([
             'memberships' => fn ($query) => $query->whereBelongsTo(request()->user()),
-        ])->loadCount(['memberships', 'extensions']));
+            'workspaces' => fn ($query) => $query->where('status', 'active')->withCount(['memberships', 'departments']),
+        ])->loadCount($this->operationalCounts()));
     }
 
     public function update(
@@ -73,7 +78,14 @@ class OrganizationController extends Controller
     ): OrganizationResource {
         Gate::authorize('update', $organization);
         $before = $organization->only(['name', 'slug', 'timezone', 'locale', 'settings']);
-        $organization->update($request->validated());
+        $attributes = $request->validated();
+        if (array_key_exists('settings', $attributes)) {
+            $attributes['settings'] = array_replace_recursive(
+                is_array($organization->settings) ? $organization->settings : [],
+                is_array($attributes['settings']) ? $attributes['settings'] : [],
+            );
+        }
+        $organization->update($attributes);
         $this->auditLogger->record(
             $request,
             $request->user(),
@@ -84,15 +96,36 @@ class OrganizationController extends Controller
             $organization->fresh()->only(['name', 'slug', 'timezone', 'locale', 'settings']),
         );
 
-        return OrganizationResource::make($organization->refresh());
+        return OrganizationResource::make($this->loadOperationalContext($organization->refresh(), $request));
     }
 
     public function members(Organization $organization): AnonymousResourceCollection
     {
         Gate::authorize('view', $organization);
 
+        $viewer = request()->user();
+        $viewerMembership = $viewer?->organizationMemberships()
+            ->where('organization_id', $organization->id)
+            ->where('status', MembershipStatus::Active->value)
+            ->first();
+
         return OrganizationMembershipResource::collection(
-            $organization->memberships()->with(['user', 'department'])->latest()->get(),
+            $organization->memberships()
+                ->when(
+                    $viewerMembership?->role === MembershipRole::Supervisor,
+                    fn ($query) => $viewerMembership->department_id === null
+                        ? $query->where('user_id', $viewer->id)
+                        : $query->where('department_id', $viewerMembership->department_id),
+                )
+                ->with([
+                    'department',
+                    'workspace',
+                    'user.extensions' => fn ($query) => $query
+                        ->where('organization_id', $organization->id)
+                        ->with('dialableNumber'),
+                ])
+                ->latest()
+                ->get(),
         );
     }
 
@@ -116,7 +149,7 @@ class OrganizationController extends Controller
             after: $this->membershipAuditData($membership),
         );
 
-        return OrganizationMembershipResource::make($membership->load(['user', 'department']))
+        return OrganizationMembershipResource::make($membership->load(['user', 'department', 'workspace']))
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
     }
@@ -132,6 +165,11 @@ class OrganizationController extends Controller
 
         $before = $this->membershipAuditData($membership);
         $data = $request->validated();
+        $assignExtension = (bool) ($data['assign_extension'] ?? false);
+        unset($data['assign_extension']);
+        if ($assignExtension) {
+            $data['auto_assign_extension'] = true;
+        }
         if (array_key_exists('department_public_id', $data)) {
             $data['department_id'] = $data['department_public_id'] === null
                 ? null
@@ -149,6 +187,10 @@ class OrganizationController extends Controller
         }
 
         $membership->update($data);
+
+        if ($assignExtension && $membership->status === MembershipStatus::Active) {
+            $this->provisionExtension->execute($membership->user);
+        }
 
         if ($membership->status === MembershipStatus::Active) {
             $this->syncFriendships->execute($organization, $membership->user);
@@ -168,7 +210,7 @@ class OrganizationController extends Controller
             );
         }
 
-        return OrganizationMembershipResource::make($membership->load(['user', 'department']));
+        return OrganizationMembershipResource::make($membership->load(['user', 'department', 'workspace']));
     }
 
     /** @return array{role: string, status: string, department_id: ?int} */
@@ -179,5 +221,26 @@ class OrganizationController extends Controller
             'status' => $membership->status?->value ?? (string) $membership->status,
             'department_id' => $membership->department_id,
         ];
+    }
+
+    /** @return array<int|string, mixed> */
+    private function operationalCounts(): array
+    {
+        return [
+            'memberships',
+            'workspaces',
+            'departments',
+            'callQueues',
+            'extensions',
+            'extensions as active_extensions_count' => fn ($query) => $query->where('status', 'active'),
+        ];
+    }
+
+    private function loadOperationalContext(Organization $organization, Request $request): Organization
+    {
+        return $organization->load([
+            'memberships' => fn ($query) => $query->whereBelongsTo($request->user()),
+            'workspaces' => fn ($query) => $query->where('status', 'active')->withCount(['memberships', 'departments']),
+        ])->loadCount($this->operationalCounts());
     }
 }
