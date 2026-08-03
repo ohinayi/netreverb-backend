@@ -67,7 +67,7 @@ Route::prefix('v1')->group(function (): void {
         'message' => 'Email verification is required.',
     ], 403))->name('verification.notice');
 
-    Route::middleware(['auth:sanctum', 'throttle:120,1'])->group(function (): void {
+    Route::middleware([StartSession::class, 'auth:sanctum', 'throttle:120,1'])->group(function (): void {
         Route::get('/me', fn(Request $request) => UserResource::make(
             $request->user()->load([
                 'extensions.dialableNumber',
