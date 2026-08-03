@@ -14,6 +14,10 @@ class ExtensionPolicy
 {
     public function viewAny(User $user, Organization $organization): bool
     {
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
         return $this->activeMembership($user, $organization) !== null;
     }
 
