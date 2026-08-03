@@ -39,6 +39,8 @@ use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Session\Middleware\StartSession;
+
 
 Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterConfigurationController::class)
     ->name('freeswitch.callcenter.configuration');
@@ -52,7 +54,7 @@ Route::prefix('v1')->group(function (): void {
         ->name('outbound.webhooks.delivery');
     Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:auth-registration');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
-        ->middleware('throttle:auth-login');
+        ->middleware([StartSession::class, 'throttle:auth-login']);
     Route::post('auth/forgot-password', [PasswordResetController::class, 'store'])
         ->middleware('throttle:password-recovery');
     Route::post('auth/reset-password', [PasswordResetController::class, 'update'])
@@ -60,19 +62,20 @@ Route::prefix('v1')->group(function (): void {
     Route::get('email/verify/{id}/{hash}', EmailVerificationController::class)
         ->middleware(['signed', 'throttle:6,1'])
         ->name('verification.verify');
-    Route::get('email/verify-required', fn () => response()->json([
+    Route::get('email/verify-required', fn() => response()->json([
         'message' => 'Email verification is required.',
     ], 403))->name('verification.notice');
 
     Route::middleware(['auth:sanctum', 'throttle:120,1'])->group(function (): void {
-        Route::get('/me', fn (Request $request) => UserResource::make(
+        Route::get('/me', fn(Request $request) => UserResource::make(
             $request->user()->load([
                 'extensions.dialableNumber',
                 'extensions.organization',
                 'extensions.provisioningState',
             ]),
         ));
-        Route::delete('auth/logout', [AuthenticatedSessionController::class, 'destroy']);
+        Route::delete('auth/logout', [AuthenticatedSessionController::class, 'destroy'])
+            ->middleware(StartSession::class);
         Route::post('email/verification-notification', EmailVerificationNotificationController::class)
             ->middleware('throttle:3,1')
             ->name('verification.send');
@@ -160,9 +163,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::post(
                     'organizations/{organization}/sms-wallet/purchases/{smsCreditPurchase}/verify',
                     [SmsWalletController::class, 'verifyPurchase'],
-                // Verification is idempotent. Keep abuse protection, but allow
-                // a user to retry after provider settlement without immediately
-                // hitting the normal purchase-creation limiter.
+                    // Verification is idempotent. Keep abuse protection, but allow
+                    // a user to retry after provider settlement without immediately
+                    // hitting the normal purchase-creation limiter.
                 )->middleware('throttle:30,1')->name('organizations.sms-wallet.purchases.verify');
                 Route::post('organizations/{organization}/message-templates', [OutboundMessagingController::class, 'storeTemplate'])
                     ->name('organizations.message-templates.store');
