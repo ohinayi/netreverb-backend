@@ -52,7 +52,8 @@ Route::prefix('v1')->group(function (): void {
     Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('outbound.webhooks.delivery');
-    Route::post('auth/register', RegisteredUserController::class)->middleware('throttle:auth-registration');
+    Route::post('auth/register', RegisteredUserController::class)
+        ->middleware([StartSession::class, 'throttle:auth-registration']);
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
         ->middleware([StartSession::class, 'throttle:auth-login']);
     Route::post('auth/forgot-password', [PasswordResetController::class, 'store'])
