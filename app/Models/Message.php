@@ -35,6 +35,11 @@ class Message extends Model
         return ['public_id'];
     }
 
+    public function getRouteKeyName(): string
+    {
+        return 'public_id';
+    }
+
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);

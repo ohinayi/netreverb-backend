@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\FriendshipController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\LeadFollowUpController;
 use App\Http\Controllers\Api\V1\MessageController;
+use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutboundCampaignController;
@@ -134,10 +135,15 @@ Route::prefix('v1')->group(function (): void {
                 ->name('communities.departments.store');
             Route::post('communities/{community}/members/{user}/department', [CommunityController::class, 'assignDepartment'])
                 ->name('communities.members.department');
-            Route::apiResource('conversations', ConversationController::class)->only(['index', 'store', 'show']);
-            Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
-                ->middleware('throttle:message-send')
-                ->name('conversations.messages.store');
+            Route::scopeBindings()->group(function (): void {
+                Route::apiResource('conversations', ConversationController::class)->only(['index', 'store', 'show']);
+                Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
+                    ->middleware('throttle:message-send')
+                    ->name('conversations.messages.store');
+                Route::post('conversations/{conversation}/messages/{message}/translate', [MessageTranslationController::class, 'store'])
+                    ->middleware('throttle:message-translate')
+                    ->name('conversations.messages.translate');
+            });
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);

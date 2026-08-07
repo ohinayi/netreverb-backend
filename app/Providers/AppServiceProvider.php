@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Contracts\Ai\AudioTranscriptionProvider;
 use App\Contracts\Ai\StructuredAssistantProvider;
 use App\Contracts\Messaging\OutboundMessageProvider;
+use App\Contracts\Translation\MessageTranslationProvider;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Recordings\ConferenceRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
@@ -21,6 +22,7 @@ use App\Services\Messaging\DisabledOutboundMessageProvider;
 use App\Services\Messaging\EBulkSmsOutboundMessageProvider;
 use App\Services\Recordings\LocalCallRecordingStorage;
 use App\Services\Recordings\LocalConferenceRecordingStorage;
+use App\Services\Translation\LibreTranslateMessageTranslationProvider;
 use App\Services\Telephony\DatabaseSipSubscriberGateway;
 use App\Services\Telephony\FreeSwitchEventSocketClient;
 use App\Services\Telephony\SocketFreeSwitchCallGateway;
@@ -55,6 +57,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(SipSubscriberGateway::class, DatabaseSipSubscriberGateway::class);
         $this->app->bind(ConferenceRecordingStorage::class, LocalConferenceRecordingStorage::class);
         $this->app->bind(CallRecordingStorage::class, LocalCallRecordingStorage::class);
+        $this->app->bind(MessageTranslationProvider::class, function () {
+            return match (config('translation.provider')) {
+                'libretranslate' => app(LibreTranslateMessageTranslationProvider::class),
+                default => app(LibreTranslateMessageTranslationProvider::class),
+            };
+        });
         $this->app->singleton(FreeSwitchEventSocketClient::class, function (): FreeSwitchEventSocketClient {
             return new FreeSwitchEventSocketClient(
                 host: config('telephony.freeswitch.event_socket_host'),
@@ -106,6 +114,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('message-send', fn (Request $request): array => [
             Limit::perMinute(60)->by('message-user:'.($request->user()?->getAuthIdentifier() ?? $request->ip())),
             Limit::perMinute(180)->by('message-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('message-translate', fn (Request $request): array => [
+            Limit::perMinute(30)->by('message-translate-user:'.($request->user()?->getAuthIdentifier() ?? $request->ip())),
+            Limit::perMinute(90)->by('message-translate-ip:'.$request->ip()),
         ]);
 
         VerifyEmail::createUrlUsing(function (object $notifiable): string {

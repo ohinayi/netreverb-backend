@@ -17,6 +17,7 @@ class MessageResource extends JsonResource
             'attachment_path' => $this->attachment_path,
             'metadata' => $this->metadata,
             'sent_at' => $this->sent_at,
+            'created_at' => $this->sent_at,
             'edited_at' => $this->edited_at,
             'sender' => $this->whenLoaded('senderUser', fn (): ?array => $this->senderUser === null ? null : [
                 'public_id' => $this->senderUser->public_id,
