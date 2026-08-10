@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Extensions\ProvisionVerifiedUserExtension;
 use App\Actions\Organizations\AddOrganizationMember;
 use App\Actions\Organizations\CreateOrganization;
 use App\Actions\Organizations\SyncOrganizationMemberFriendships;
-use App\Actions\Extensions\ProvisionVerifiedUserExtension;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;

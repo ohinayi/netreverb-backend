@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ConversationKind;
+use App\Enums\FriendshipStatus;
+use App\Enums\MessageRequestStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreConversationRequest;
 use App\Http\Resources\Api\V1\ConversationResource;
@@ -10,6 +12,8 @@ use App\Models\Community;
 use App\Models\CommunityMembership;
 use App\Models\Conversation;
 use App\Models\ConversationParticipant;
+use App\Models\Friendship;
+use App\Models\MessageRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,7 +31,9 @@ class ConversationController extends Controller
             ->with(['community', 'participants.user', 'lastMessage.senderUser'])
             ->withCount('participants')
             ->latest('last_message_at')
-            ->paginate(20);
+            ->get()
+            ->filter(fn (Conversation $conversation) => Gate::allows('view', $conversation))
+            ->values();
 
         return ConversationResource::collection($conversations);
     }
@@ -49,6 +55,42 @@ class ConversationController extends Controller
             throw ValidationException::withMessages([
                 'participant_public_ids' => 'Direct conversations require exactly one other participant.',
             ]);
+        }
+
+        if ($kind === ConversationKind::Direct) {
+            $otherUserId = $participantIds->first(fn (int $id): bool => $id !== $request->user()->id);
+
+            $isFriend = Friendship::query()
+                ->where('status', FriendshipStatus::Accepted)
+                ->where(function ($query) use ($request, $otherUserId): void {
+                    $query->where(function ($q) use ($request, $otherUserId): void {
+                        $q->where('requester_id', $request->user()->id)
+                            ->where('addressee_id', $otherUserId);
+                    })->orWhere(function ($q) use ($request, $otherUserId): void {
+                        $q->where('requester_id', $otherUserId)
+                            ->where('addressee_id', $request->user()->id);
+                    });
+                })
+                ->exists();
+
+            $hasAcceptedRequest = MessageRequest::query()
+                ->where('status', MessageRequestStatus::Accepted)
+                ->where(function ($query) use ($request, $otherUserId): void {
+                    $query->where(function ($q) use ($request, $otherUserId): void {
+                        $q->where('sender_user_id', $request->user()->id)
+                            ->where('recipient_user_id', $otherUserId);
+                    })->orWhere(function ($q) use ($request, $otherUserId): void {
+                        $q->where('sender_user_id', $otherUserId)
+                            ->where('recipient_user_id', $request->user()->id);
+                    });
+                })
+                ->exists();
+
+            if (! $isFriend && ! $hasAcceptedRequest) {
+                throw ValidationException::withMessages([
+                    'participant_public_ids' => 'Messaging is restricted to accepted friends or accepted message requests.',
+                ]);
+            }
         }
 
         $community = null;

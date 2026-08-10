@@ -19,7 +19,7 @@ class IndividualUserSeeder extends Seeder
                 'terms_accepted_at' => now(),
                 'password' => 'password',
             ],
-            
+
         );
 
         User::query()->updateOrCreate(

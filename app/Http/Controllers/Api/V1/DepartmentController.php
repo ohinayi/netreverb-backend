@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\MembershipRole;
+use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreDepartmentRequest;
 use App\Http\Requests\Api\V1\UpdateDepartmentRequest;
 use App\Http\Resources\Api\V1\DepartmentResource;
-use App\Enums\MembershipRole;
-use App\Enums\MembershipStatus;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Services\Auditing\AuditLogger;

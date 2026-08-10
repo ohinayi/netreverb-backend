@@ -86,6 +86,7 @@ class ReconcileConferenceRoomParticipants extends Command
                 // disconnect and will transition it to `disconnected`.
                 if ($this->isHostModerated($participant)) {
                     $participantPresenceService->touchHeartbeat($participant);
+
                     continue;
                 }
 
@@ -98,6 +99,7 @@ class ReconcileConferenceRoomParticipants extends Command
                     : null;
                 if (is_string($moderatedAt) && now()->diffInSeconds($moderatedAt) < 45) {
                     $participantPresenceService->touchHeartbeat($participant);
+
                     continue;
                 }
 

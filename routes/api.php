@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\FriendshipController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\LeadFollowUpController;
 use App\Http\Controllers\Api\V1\MessageController;
+use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrganizationController;
@@ -39,9 +40,8 @@ use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Session\Middleware\StartSession;
-
+use Illuminate\Support\Facades\Route;
 
 Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterConfigurationController::class)
     ->name('freeswitch.callcenter.configuration');
@@ -66,12 +66,12 @@ Route::prefix('v1')->group(function (): void {
     Route::get('email/verify/{id}/{hash}', EmailVerificationController::class)
         ->middleware(['signed', 'throttle:6,1'])
         ->name('verification.verify');
-    Route::get('email/verify-required', fn() => response()->json([
+    Route::get('email/verify-required', fn () => response()->json([
         'message' => 'Email verification is required.',
     ], 403))->name('verification.notice');
 
     Route::middleware([StartSession::class, 'auth:sanctum', 'throttle:120,1'])->group(function (): void {
-        Route::get('/me', fn(Request $request) => UserResource::make(
+        Route::get('/me', fn (Request $request) => UserResource::make(
             $request->user()->load([
                 'extensions.dialableNumber',
                 'extensions.organization',
@@ -126,6 +126,19 @@ Route::prefix('v1')->group(function (): void {
             Route::apiResource('friendships', FriendshipController::class)->only(['index', 'store', 'show']);
             Route::post('friendships/{friendship}/respond', [FriendshipController::class, 'update'])
                 ->name('friendships.respond');
+
+            Route::get('message-requests/received', [MessageRequestController::class, 'indexReceived'])
+                ->name('message-requests.received');
+            Route::get('message-requests/sent', [MessageRequestController::class, 'indexSent'])
+                ->name('message-requests.sent');
+            Route::get('message-requests/check', [MessageRequestController::class, 'check'])
+                ->name('message-requests.check');
+            Route::post('message-requests', [MessageRequestController::class, 'store'])
+                ->name('message-requests.store');
+            Route::post('message-requests/{messageRequest}/accept', [MessageRequestController::class, 'accept'])
+                ->name('message-requests.accept');
+            Route::delete('message-requests/{messageRequest}', [MessageRequestController::class, 'destroy'])
+                ->name('message-requests.destroy');
             Route::apiResource('communities', CommunityController::class)->only(['index', 'store', 'show']);
             Route::post('communities/{community}/join', [CommunityController::class, 'join'])
                 ->name('communities.join');

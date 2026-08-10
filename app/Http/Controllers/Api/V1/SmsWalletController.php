@@ -98,6 +98,7 @@ class SmsWalletController extends Controller
                 'gateway' => $smsCreditPurchase->payment_method,
                 'error' => $exception->getMessage(),
             ]);
+
             return response()->json([
                 'data' => $this->purchaseData($smsCreditPurchase->refresh()),
                 'message' => $exception instanceof \RuntimeException

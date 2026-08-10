@@ -258,8 +258,8 @@ class PaymentGatewayService
         throw_unless($this->enabled(), RuntimeException::class, 'Automated payments are disabled.');
         $readiness = $this->readiness();
         throw_unless(
-                isset($readiness[$gateway])
-                && $readiness[$gateway]['configured'],
+            isset($readiness[$gateway])
+            && $readiness[$gateway]['configured'],
             RuntimeException::class,
             'The selected payment gateway is not configured.',
         );

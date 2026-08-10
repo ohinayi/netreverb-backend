@@ -120,7 +120,9 @@ class ConferenceRoomPolicy
 
     private function canManage(User $user, Organization|int $organization): bool
     {
-        if ($user->isSuperAdmin()) return true;
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
 
         return in_array(
             $this->activeMembership($user, $organization)?->role,

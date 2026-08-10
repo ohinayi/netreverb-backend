@@ -4,9 +4,9 @@ namespace App\Services\Telephony;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
 use App\Data\CallRecordingProfile;
-use App\Exceptions\FreeSwitchTransferException;
 use App\Enums\CallRecordingMediaType;
 use App\Exceptions\FreeSwitchRecordingException;
+use App\Exceptions\FreeSwitchTransferException;
 use RuntimeException;
 
 class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
@@ -68,8 +68,7 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
         string $destination,
         string $callerNumber,
         int $ringTimeoutSeconds = 20,
-    ): void
-    {
+    ): void {
         // A blind uuid_transfer immediately removes the current bridge. Create
         // a consultation leg first and replace the bridge only after the target
         // answers. We intentionally do not SIP-hold the caller here: a hold

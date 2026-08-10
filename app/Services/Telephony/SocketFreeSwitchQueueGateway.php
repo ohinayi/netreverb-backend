@@ -30,7 +30,9 @@ class SocketFreeSwitchQueueGateway implements FreeSwitchQueueGateway
 
         foreach ($queue->members->where('enabled', true)->values() as $position => $member) {
             $extension = $member->extension;
-            if ($extension === null || $extension->dialableNumber === null) continue;
+            if ($extension === null || $extension->dialableNumber === null) {
+                continue;
+            }
 
             $agent = $this->agentName($queue, $extension->dialableNumber->number);
             $contact = sprintf(
@@ -64,7 +66,9 @@ class SocketFreeSwitchQueueGateway implements FreeSwitchQueueGateway
     private function existingAgents(string $queueName): array
     {
         $response = $this->client->api("callcenter_config tier list {$queueName}");
-        if (! str_contains($response, '+OK')) return [];
+        if (! str_contains($response, '+OK')) {
+            return [];
+        }
 
         return collect(preg_split('/\R/', $response) ?: [])
             ->filter(fn (string $line): bool => str_starts_with($line, $queueName.'|'))
@@ -87,9 +91,15 @@ class SocketFreeSwitchQueueGateway implements FreeSwitchQueueGateway
     private function run(string $command, bool $acceptExisting = false, bool $acceptMissing = false): void
     {
         $response = $this->client->api($command);
-        if (str_contains($response, '+OK')) return;
-        if ($acceptExisting && str_contains(strtolower($response), 'already exist')) return;
-        if ($acceptMissing && str_contains(strtolower($response), 'not found')) return;
+        if (str_contains($response, '+OK')) {
+            return;
+        }
+        if ($acceptExisting && str_contains(strtolower($response), 'already exist')) {
+            return;
+        }
+        if ($acceptMissing && str_contains(strtolower($response), 'not found')) {
+            return;
+        }
 
         throw new RuntimeException(sprintf(
             'FreeSWITCH queue configuration failed for [%s]: %s',

@@ -25,6 +25,7 @@ class SynchronizeFreeSwitchQueue implements ShouldQueue
 
         if ($this->remove) {
             $gateway->remove($this->queuePublicId);
+
             return;
         }
 
@@ -32,6 +33,7 @@ class SynchronizeFreeSwitchQueue implements ShouldQueue
             if ($queue !== null) {
                 $gateway->remove('nr_'.$queue->extension->dialableNumber->number.'@default');
             }
+
             return;
         }
 

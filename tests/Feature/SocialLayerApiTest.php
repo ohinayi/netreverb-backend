@@ -104,6 +104,21 @@ class SocialLayerApiTest extends TestCase
         $recipient = User::factory()->create(['email_verified_at' => now()]);
         Sanctum::actingAs($sender);
 
+        // Attempting direct conversation before friendship should be rejected
+        $this->postJson('/api/v1/conversations', [
+            'kind' => ConversationKind::Direct->value,
+            'participant_public_ids' => [$recipient->public_id],
+        ])->assertStatus(422);
+
+        // Establish accepted friendship
+        Friendship::query()->create([
+            'requester_id' => $sender->id,
+            'addressee_id' => $recipient->id,
+            'status' => FriendshipStatus::Accepted,
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+
         $conversationResponse = $this->postJson('/api/v1/conversations', [
             'kind' => ConversationKind::Direct->value,
             'participant_public_ids' => [$recipient->public_id],
