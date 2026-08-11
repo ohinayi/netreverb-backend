@@ -263,21 +263,11 @@ class CallLogController extends Controller
         $data = $request->validated();
         $recordingWasActive = in_array($callLog->recording_status, [CallRecordingStatus::Starting, CallRecordingStatus::Recording], true);
 
-        // An audio-to-video upgrade replaces the whole SIP session with a
-        // brand new INVITE (SipCallingClient::requestVideoUpgrade/
-        // acceptVideoUpgrade) rather than a true in-dialog re-INVITE, so
-        // FreeSWITCH assigns the video leg an entirely new channel UUID and
-        // tears down the old one. FreeSwitchCallUuidSynchronizer only ever
-        // matches a call log whose freeswitch_uuid is still NULL - once set,
-        // it is never replaced, even when the channel it points at is long
-        // gone. Without an explicit way to forget it, this call log was
-        // permanently stuck on the dead audio-leg UUID for the rest of the
-        // call, and every subsequent "start recording" attempt failed with
-        // FreeSWITCH's own "Cannot locate session!" for a channel that no
-        // longer exists. reset_freeswitch_uuid is how the frontend tells us
-        // the underlying channel just changed out from under this call log -
-        // clearing it lets the same sync job that resolved it the first time
-        // resolve it again for the new channel.
+        // reset_freeswitch_uuid tells us a call log's channel changed out
+        // from under it (e.g. it was resolved to a now-dead channel).
+        // FreeSwitchCallUuidSynchronizer only ever matches a call log whose
+        // freeswitch_uuid is still NULL - clearing it here lets that same
+        // sync job re-resolve the real, current channel.
         $resetFreeSwitchUuid = (bool) ($data['reset_freeswitch_uuid'] ?? false);
         unset($data['reset_freeswitch_uuid']);
 
@@ -294,6 +284,7 @@ class CallLogController extends Controller
         $callLog->update($data);
         $callLog->refresh();
         $this->prepareRecordingInfrastructure($callLog);
+        $this->mirrorVideoUpgradeStatusToSiblingLeg($callLog, $data);
 
         if ($recordingWasActive && $this->isTerminalCallStatus($callLog->status)) {
             $this->recordingManager->stop($callLog);
@@ -432,6 +423,56 @@ class CallLogController extends Controller
             'calleeExtension.user',
             'calleeExtension.fallbackExtension',
         ];
+    }
+
+    /**
+     * Each party in a call independently creates its own call_logs row when
+     * the call starts (see stores/calling.ts handleCallStateTransition) - a
+     * physical call is two separate rows with two DIFFERENT freeswitch_uuid
+     * values (FreeSWITCH's B2BUA assigns each bridged leg its own channel
+     * UUID; confirmed empirically, not just in theory - two rows for the
+     * same live test call had two different UUIDs). The audio-to-video
+     * upgrade accept handshake (see stores/calling.ts
+     * handleVideoUpgradeStatus) relies on both parties' independent polling
+     * loops seeing the same video_upgrade_status value - writing it to only
+     * the row the request came in on left the other party's row, and
+     * therefore their poll, completely unaware anything happened.
+     *
+     * There is no shared key between the two rows at all, so find the
+     * sibling leg the same way FreeSwitchCallUuidSynchronizer::
+     * resolveCallLog() already does: matching caller/callee number (either
+     * order - each party's own row has itself and the other party in
+     * opposite caller/callee slots) within a short window of this row's
+     * creation.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function mirrorVideoUpgradeStatusToSiblingLeg(CallLog $callLog, array $data): void
+    {
+        if (! array_key_exists('video_upgrade_status', $data)) {
+            return;
+        }
+
+        // Not scoped to organization_id: the two parties' rows can belong to
+        // different organizations entirely (each party's call log lives in
+        // their own org/workspace context) - confirmed empirically on a real
+        // test call (org 6 vs org 5 for the same physical call).
+        CallLog::query()
+            ->whereKeyNot($callLog->getKey())
+            ->whereBetween('created_at', [
+                $callLog->created_at->copy()->subMinute(),
+                $callLog->created_at->copy()->addMinute(),
+            ])
+            ->where(function ($query) use ($callLog): void {
+                $query->where([
+                    'caller_number' => $callLog->caller_number,
+                    'callee_number' => $callLog->callee_number,
+                ])->orWhere([
+                    'caller_number' => $callLog->callee_number,
+                    'callee_number' => $callLog->caller_number,
+                ]);
+            })
+            ->update(['video_upgrade_status' => $data['video_upgrade_status']]);
     }
 
     /**
