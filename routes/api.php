@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
+use App\Http\Controllers\Api\V1\CallLogNoteController;
 use App\Http\Controllers\Api\V1\CallQueueController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CommunityController;
@@ -31,12 +32,14 @@ use App\Http\Controllers\Api\V1\OutboundCampaignController;
 use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
 use App\Http\Controllers\Api\V1\OutboundMessagingController;
 use App\Http\Controllers\Api\V1\PaymentWebhookController;
+use App\Http\Controllers\Api\V1\RecordingController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SmsWalletController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
+use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
@@ -271,6 +274,27 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                     'organizations/{organization}/call-logs/{callLog}/recording',
                     [CallRecordingController::class, 'destroy'],
                 )->name('organizations.call-logs.recording.destroy');
+                Route::get(
+                    'organizations/{organization}/call-logs/{callLog}/notes',
+                    [CallLogNoteController::class, 'index'],
+                )->name('organizations.call-logs.notes.index');
+                Route::post(
+                    'organizations/{organization}/call-logs/{callLog}/notes',
+                    [CallLogNoteController::class, 'store'],
+                )->name('organizations.call-logs.notes.store');
+                Route::delete(
+                    'organizations/{organization}/call-logs/{callLog}/notes/{note}',
+                    [CallLogNoteController::class, 'destroy'],
+                )->name('organizations.call-logs.notes.destroy');
+                Route::get('organizations/{organization}/notes', [CallLogNoteController::class, 'indexForOrganization'])
+                    ->name('organizations.notes.index');
+                Route::get('organizations/{organization}/recordings', [RecordingController::class, 'index'])
+                    ->name('organizations.recordings.index');
+                Route::apiResource('organizations.tickets', TicketController::class);
+                Route::get('organizations/{organization}/tickets/{ticket}/messages', [TicketController::class, 'messages'])
+                    ->name('organizations.tickets.messages.index');
+                Route::post('organizations/{organization}/tickets/{ticket}/messages', [TicketController::class, 'storeMessage'])
+                    ->name('organizations.tickets.messages.store');
                 Route::apiResource('organizations.conference-rooms', ConferenceRoomController::class)
                     ->only(['index', 'store', 'show'])
                     ->parameters(['conference-rooms' => 'conferenceRoom']);

@@ -69,10 +69,21 @@ class CombineConferenceRecordingTracks implements ShouldQueue
                 $localPath = $workDir.'/track_'.$index.'.'.$extension;
                 File::put($localPath, $disk->get($track->storage_key));
 
+                // Every raw track used to be fed to ffmpeg as if it started
+                // at t=0. A track that only started recording partway through
+                // the call (most commonly: someone upgrades from audio-only
+                // to video mid-call, so their camera track's egress begins
+                // minutes after the microphone track's) was therefore
+                // composited out of sync with everything else. The track
+                // row's created_at is when its egress actually began, so use
+                // the gap from the recording's own start as an -itsoffset.
+                $offsetSeconds = max(0, $track->created_at?->getTimestamp() - $recording->created_at->getTimestamp());
+                $input = ['path' => $localPath, 'offset' => $offsetSeconds];
+
                 if (in_array($track->kind, self::VIDEO_KINDS, true)) {
-                    $videoInputs[] = $localPath;
+                    $videoInputs[] = $input;
                 } elseif (in_array($track->kind, self::AUDIO_KINDS, true)) {
-                    $audioInputs[] = $localPath;
+                    $audioInputs[] = $input;
                 }
             }
 
@@ -104,8 +115,8 @@ class CombineConferenceRecordingTracks implements ShouldQueue
     }
 
     /**
-     * @param  list<string>  $videoInputs
-     * @param  list<string>  $audioInputs
+     * @param  list<array{path: string, offset: int}>  $videoInputs
+     * @param  list<array{path: string, offset: int}>  $audioInputs
      */
     private function combine(array $videoInputs, array $audioInputs, string $outputPath): void
     {
@@ -118,8 +129,12 @@ class CombineConferenceRecordingTracks implements ShouldQueue
 
         $args = ['ffmpeg', '-y'];
         foreach ([...$videoInputs, ...$audioInputs] as $input) {
+            if ($input['offset'] > 0) {
+                $args[] = '-itsoffset';
+                $args[] = (string) $input['offset'];
+            }
             $args[] = '-i';
-            $args[] = $input;
+            $args[] = $input['path'];
         }
 
         $filters = [];

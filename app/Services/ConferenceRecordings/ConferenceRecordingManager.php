@@ -5,6 +5,7 @@ namespace App\Services\ConferenceRecordings;
 use App\Contracts\Recordings\ConferenceRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Enums\ConferenceRecordingStatus;
+use App\Enums\ConferenceRecordingTrackStatus;
 use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRecording;
 use App\Models\ConferenceRoom;
@@ -191,13 +192,18 @@ class ConferenceRecordingManager
     public function cleanup(int $retentionDays): int
     {
         $cutoff = now()->subDays(max(1, $retentionDays));
+        // A legitimate stop-and-combine should finish within minutes, not
+        // days - use a much shorter staleness window than the retention
+        // cutoff so a stuck row gets resolved on the next nightly run
+        // instead of silently sitting there until it ages out.
+        $staleProcessingCutoff = now()->subHours(2);
         $deletedCount = 0;
 
         ConferenceRecording::query()
             ->with(['conferenceRoom', 'tracks'])
             ->whereNull('deleted_at')
             ->oldest('id')
-            ->chunkById(100, function ($recordings) use ($cutoff, &$deletedCount): void {
+            ->chunkById(100, function ($recordings) use ($cutoff, $staleProcessingCutoff, &$deletedCount): void {
                 foreach ($recordings as $recording) {
                     $conferenceRoom = $recording->conferenceRoom;
                     $shouldDelete = false;
@@ -240,6 +246,29 @@ class ConferenceRecordingManager
                     ], true)
                         && $recording->created_at !== null
                         && $recording->created_at->lt($cutoff)) {
+                        $shouldDelete = true;
+                    } elseif (in_array($recording->status, [
+                        ConferenceRecordingStatus::Stopping,
+                        ConferenceRecordingStatus::Combining,
+                    ], true)
+                        && $recording->created_at !== null
+                        && $recording->created_at->lt($staleProcessingCutoff)) {
+                        // A track's stopEgress() call can fail on a network
+                        // blip, or its completion webhook can simply never
+                        // arrive - either way maybeFinalizeRecording() then
+                        // waits forever for a terminal track state that will
+                        // never come. A queue worker crash mid-combine can
+                        // strand a row in Combining the exact same way. Both
+                        // previously sat here forever, invisible to every
+                        // other branch above. Force resolution instead.
+                        foreach ($recording->tracks as $track) {
+                            if (! $track->status->isTerminal()) {
+                                $track->forceFill(['status' => ConferenceRecordingTrackStatus::Failed])->save();
+                            }
+                        }
+                        $recording->forceFill([
+                            'status' => ConferenceRecordingStatus::Orphaned,
+                        ])->save();
                         $shouldDelete = true;
                     }
 

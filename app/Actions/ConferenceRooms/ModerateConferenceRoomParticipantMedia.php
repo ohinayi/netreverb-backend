@@ -4,6 +4,7 @@ namespace App\Actions\ConferenceRooms;
 
 use Agence104\LiveKit\RoomServiceClient;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
+use App\Enums\ConferenceParticipantStatus;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\User;
@@ -146,18 +147,36 @@ class ModerateConferenceRoomParticipantMedia
                 fn (): null => $freeSwitchCommand($conferenceRoom->sip_number, $liveMember['member_id']),
             );
         } elseif (! $this->applyViaLiveKit($conferenceRoom, $participant, $trackSource, $muted)) {
-            Log::warning('Conference moderation could not match participant to a live FreeSWITCH member or LiveKit track.', [
+            // No matching *published* track was found — most commonly because
+            // the target's camera/mic is already off, so there is nothing
+            // live at the SFU to mute right now. That is not a moderation
+            // failure: the flag is still persisted below, LiveKitTokenController
+            // now bakes it into their next token (see LiveKitTokenController::
+            // currentModerationState()), and canPublishSources blocks them
+            // from turning it back on. Only a participant who isn't actually
+            // in the meeting at all is a genuine error.
+            if ($participant->status !== ConferenceParticipantStatus::Joined) {
+                Log::warning('Conference moderation attempted on a participant who is not joined.', [
+                    'conference_room_id' => $conferenceRoom->public_id,
+                    'participant_id' => $participant->public_id,
+                    'moderator_id' => $moderator->public_id,
+                    'sip_number' => $conferenceRoom->sip_number,
+                    'participant_status' => $participant->status?->value ?? $participant->status,
+                    'track_source' => $trackSource,
+                    'action' => 'moderation',
+                ]);
+
+                throw ValidationException::withMessages([
+                    'participant' => 'This participant is not actively connected to the conference.',
+                ]);
+            }
+
+            Log::info('Conference moderation persisted with no live track to mute; will apply on next publish/reconnect.', [
                 'conference_room_id' => $conferenceRoom->public_id,
                 'participant_id' => $participant->public_id,
                 'moderator_id' => $moderator->public_id,
-                'sip_number' => $conferenceRoom->sip_number,
-                'participant_status' => $participant->status?->value ?? $participant->status,
                 'track_source' => $trackSource,
-                'action' => 'moderation',
-            ]);
-
-            throw ValidationException::withMessages([
-                'participant' => 'This participant is not actively connected to the conference.',
+                'muted' => $muted,
             ]);
         }
 

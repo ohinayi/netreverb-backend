@@ -5,11 +5,15 @@ namespace App\Http\Controllers\Api\V1;
 use Agence104\LiveKit\AccessToken;
 use Agence104\LiveKit\AccessTokenOptions;
 use Agence104\LiveKit\VideoGrant;
+use App\Enums\ConferenceParticipantKind;
 use App\Http\Controllers\Controller;
 use App\Models\ConferenceRoom;
+use App\Models\ConferenceRoomParticipant;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Livekit\TrackSource;
 use Symfony\Component\HttpFoundation\Response;
 
 class LiveKitTokenController extends Controller
@@ -47,16 +51,38 @@ class LiveKitTokenController extends Controller
             'conference_room_id' => $conferenceRoom->public_id,
         ], JSON_THROW_ON_ERROR);
 
+        // A host's mute/camera-off action only reaches the *currently
+        // connected* LiveKit session (it calls updateParticipant() on a live
+        // session) - any reconnect (refresh, dropped socket) mints a brand
+        // new token/session with no memory of it, so the participant's
+        // mic/camera silently come back on. The moderation flags are already
+        // persisted on the participant row; carry them into every token so a
+        // reconnect can't bypass a host mute.
+        $moderation = $this->currentModerationState($conferenceRoom, $user);
+
         $options = (new AccessTokenOptions())
             ->setIdentity($identity)
             ->setName($user->name)
             ->setTtl(max(60, min(900, (int) config('livekit.token_ttl', 300))))
-            ->setMetadata($metadata);
+            ->setMetadata($metadata)
+            ->setAttributes([
+                'moderation_audio_muted' => $moderation['audio_muted_by_host'] ? '1' : '',
+                'moderation_video_muted' => $moderation['video_muted_by_host'] ? '1' : '',
+            ]);
+
+        $publishSources = [TrackSource::MICROPHONE, TrackSource::CAMERA, TrackSource::SCREEN_SHARE, TrackSource::SCREEN_SHARE_AUDIO];
+        if ($moderation['audio_muted_by_host']) {
+            $publishSources = array_values(array_diff($publishSources, [TrackSource::MICROPHONE]));
+        }
+        if ($moderation['video_muted_by_host']) {
+            $publishSources = array_values(array_diff($publishSources, [TrackSource::CAMERA]));
+        }
 
         $grant = (new VideoGrant())
             ->setRoomJoin()
             ->setRoomName($room)
             ->setCanPublish()
+            ->setCanPublishSources($publishSources)
             ->setCanSubscribe()
             ->setCanPublishData();
 
@@ -73,5 +99,27 @@ class LiveKitTokenController extends Controller
                 'expires_at' => now()->addSeconds($options->getTtl())->toISOString(),
             ],
         ]);
+    }
+
+    /**
+     * @return array{audio_muted_by_host: bool, video_muted_by_host: bool}
+     */
+    private function currentModerationState(ConferenceRoom $conferenceRoom, User $user): array
+    {
+        $participant = ConferenceRoomParticipant::query()
+            ->where('conference_room_id', $conferenceRoom->id)
+            ->where('user_id', $user->id)
+            ->where('kind', ConferenceParticipantKind::Primary)
+            ->latest('id')
+            ->first();
+
+        $moderation = is_array($participant?->metadata['moderation'] ?? null)
+            ? $participant->metadata['moderation']
+            : [];
+
+        return [
+            'audio_muted_by_host' => (bool) ($moderation['audio_muted_by_host'] ?? false),
+            'video_muted_by_host' => (bool) ($moderation['video_muted_by_host'] ?? false),
+        ];
     }
 }

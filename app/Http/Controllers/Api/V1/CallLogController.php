@@ -69,6 +69,7 @@ class CallLogController extends Controller
                 'calleeExtension.user',
                 'calleeExtension.fallbackExtension',
             ])
+            ->withCount('notes')
             ->when(
                 ! $canViewAll,
                 function ($query) use ($accessibleExtensionIds): void {
@@ -338,9 +339,36 @@ class CallLogController extends Controller
      */
     private function deduplicateCallLogs(Collection $callLogs): Collection
     {
+        $recordingFields = [
+            'recording_url', 'recording_id', 'recording_uuid', 'recording_media_type',
+            'recording_container', 'recording_file_path', 'recording_file_name',
+            'recording_duration', 'recording_size', 'recording_status',
+            'recording_started_at', 'recording_ended_at',
+        ];
+
         return $callLogs
-            ->sortByDesc(fn (CallLog $callLog): int => $this->callLogDisplayPriority($callLog))
-            ->unique(fn (CallLog $callLog): string => $callLog->freeswitch_uuid ?? $callLog->public_id)
+            ->groupBy(fn (CallLog $callLog): string => $callLog->freeswitch_uuid ?? $callLog->public_id)
+            ->map(function (Collection $group) use ($recordingFields): CallLog {
+                $winner = $group->sortByDesc(fn (CallLog $callLog): int => $this->callLogDisplayPriority($callLog))->first();
+
+                // The dedup keeps only one row per call, but a losing row can
+                // still carry the only completed recording for that call (a
+                // second call_logs write for the same freeswitch_uuid, e.g.
+                // from a leg update, may not have copied recording_* over).
+                // Merge any recording data the winner is missing so it is
+                // never silently dropped from the Calls tab.
+                if ($winner->recording_status === null) {
+                    $donor = $group->first(fn (CallLog $callLog): bool => $callLog->recording_status !== null);
+
+                    if ($donor !== null) {
+                        foreach ($recordingFields as $field) {
+                            $winner->setAttribute($field, $donor->getAttribute($field));
+                        }
+                    }
+                }
+
+                return $winner;
+            })
             ->sortByDesc(fn (CallLog $callLog): int => $callLog->created_at?->getTimestamp() ?? 0)
             ->values();
     }

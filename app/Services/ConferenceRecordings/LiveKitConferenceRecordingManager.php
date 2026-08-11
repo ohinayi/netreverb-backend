@@ -239,32 +239,58 @@ class LiveKitConferenceRecordingManager
 
     public function stop(ConferenceRecording $recording): ConferenceRecording
     {
+        // Flip to Stopping FIRST, before touching any track. The sync-tracks
+        // cron (SyncConferenceRecordingTracks, every 10s) only starts new
+        // track egresses for recordings still in status===Recording - doing
+        // this first closes most of the window where a track upgrade (e.g.
+        // camera published mid-call) could have its egress started by that
+        // cron concurrently with us tearing everything else down here, which
+        // previously left that one egress running forever with no DB row
+        // stop() ever knew to grab.
+        $recording->forceFill(['status' => ConferenceRecordingStatus::Stopping])->save();
+
         $client = new EgressServiceClient(
             config('livekit.egress_api_url'),
             config('livekit.api_key'),
             config('livekit.api_secret'),
         );
 
-        $activeTracks = $recording->tracks()
-            ->whereIn('status', [ConferenceRecordingTrackStatus::Starting, ConferenceRecordingTrackStatus::Recording])
-            ->get();
+        // Query and stop twice: a track row can still be mid-INSERT (its
+        // egress already started at LiveKit, but the DB write from
+        // startRawTrackEgress() hasn't landed yet) when the first query runs.
+        // The short sleep between passes gives that in-flight insert time to
+        // commit so the second pass actually catches it.
+        $stoppedEgressIds = [];
+        for ($pass = 0; $pass < 2; $pass++) {
+            $activeTracks = $recording->tracks()
+                ->whereIn('status', [ConferenceRecordingTrackStatus::Starting, ConferenceRecordingTrackStatus::Recording])
+                ->get();
 
-        foreach ($activeTracks as $track) {
-            try {
-                $client->stopEgress($track->egress_id);
-                $track->forceFill(['status' => ConferenceRecordingTrackStatus::Stopping])->save();
-            } catch (Throwable $exception) {
-                Log::warning('Failed to stop track composite egress.', [
-                    'recording_id' => $recording->recording_id,
-                    'track_id' => $track->id,
-                    'exception' => $exception::class,
-                    'message' => $exception->getMessage(),
-                ]);
+            foreach ($activeTracks as $track) {
+                if (in_array($track->egress_id, $stoppedEgressIds, true)) {
+                    continue;
+                }
+
+                try {
+                    $client->stopEgress($track->egress_id);
+                    $track->forceFill(['status' => ConferenceRecordingTrackStatus::Stopping])->save();
+                    $stoppedEgressIds[] = $track->egress_id;
+                } catch (Throwable $exception) {
+                    Log::warning('Failed to stop track composite egress.', [
+                        'recording_id' => $recording->recording_id,
+                        'track_id' => $track->id,
+                        'exception' => $exception::class,
+                        'message' => $exception->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($pass === 0) {
+                usleep(500_000);
             }
         }
 
         $recording->forceFill([
-            'status' => ConferenceRecordingStatus::Stopping,
             'duration' => max(0, now()->diffInSeconds($recording->created_at)),
         ])->save();
 

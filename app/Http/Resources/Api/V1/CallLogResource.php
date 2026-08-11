@@ -73,6 +73,7 @@ class CallLogResource extends JsonResource
                     ]
                     : null,
             ] : null,
+            'notes_count' => $this->whenCounted('notes'),
             'started_at' => $this->started_at,
             'ended_at' => $this->ended_at,
             'caller_extension' => ExtensionResource::make($this->whenLoaded('callerExtension')),
