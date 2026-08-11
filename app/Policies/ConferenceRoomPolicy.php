@@ -65,7 +65,13 @@ class ConferenceRoomPolicy
             ->where('conference_room_id', $conferenceRoom->id)
             ->where('user_id', $user->id)
             ->primary()
-            ->where('status', ConferenceParticipantStatus::Joined->value)
+            // A browser refresh briefly marks the media participant as
+            // disconnected. It is still an admitted participant and must be
+            // allowed to reconnect and obtain a new LiveKit token.
+            ->whereIn('status', [
+                ConferenceParticipantStatus::Joined->value,
+                ConferenceParticipantStatus::Disconnected->value,
+            ])
             ->exists();
     }
 

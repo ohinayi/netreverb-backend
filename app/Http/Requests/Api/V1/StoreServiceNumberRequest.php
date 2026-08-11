@@ -29,7 +29,7 @@ class StoreServiceNumberRequest extends FormRequest
             ],
             'name' => ['required', 'string', 'min:2', 'max:120'],
             'type' => ['required', Rule::enum(ServiceNumberType::class)],
-            'target' => ['required', 'string', 'max:128', 'regex:/^[A-Za-z0-9_.:@-]+$/'],
+            'target' => ['sometimes', 'nullable', 'string', 'max:128', 'regex:/^[A-Za-z0-9_.:@-]+$/'],
             'enabled' => ['sometimes', 'boolean'],
             'configuration' => ['sometimes', 'nullable', 'array'],
         ];

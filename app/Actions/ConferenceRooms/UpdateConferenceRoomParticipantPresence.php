@@ -7,11 +7,15 @@ use App\Events\ConferenceRoomParticipantPresenceUpdated;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
+use App\Services\ConferenceRecordings\LiveKitConferenceRecordingManager;
 use Illuminate\Support\Facades\DB;
 
 class UpdateConferenceRoomParticipantPresence
 {
-    public function __construct(private ConferenceRecordingManager $recordingManager) {}
+    public function __construct(
+        private ConferenceRecordingManager $recordingManager,
+        private LiveKitConferenceRecordingManager $liveKitRecordingManager,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $metadata
@@ -65,6 +69,7 @@ class UpdateConferenceRoomParticipantPresence
 
         if ($shouldStopRecording) {
             $this->recordingManager->stop($participant->conferenceRoom);
+            $this->liveKitRecordingManager->stopActiveForRoom($participant->conferenceRoom);
         }
 
         return $participant;

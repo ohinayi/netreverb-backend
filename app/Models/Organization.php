@@ -85,6 +85,11 @@ class Organization extends Model
         return $this->hasMany(ConferenceRoom::class);
     }
 
+    public function ivrs(): HasMany
+    {
+        return $this->hasMany(OrganizationIvr::class);
+    }
+
     public function departments(): HasMany
     {
         return $this->hasMany(Department::class);

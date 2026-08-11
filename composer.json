@@ -10,9 +10,11 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "agence104/livekit-server-sdk": "^1.3",
         "laravel/framework": "^13.8",
         "laravel/sanctum": "^4.3",
-        "laravel/tinker": "^3.0"
+        "laravel/tinker": "^3.0",
+        "league/flysystem-aws-s3-v3": "^3.35"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -47,8 +49,10 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"sh -c 'while true; do ssh -NT -i /home/abduljabbar/.ssh/netreverb-kamailio-tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o ConnectTimeout=15 -L 127.0.0.1:3307:127.0.0.1:3306 -L 127.0.0.1:8021:127.0.0.1:8021 -L 127.0.0.1:18081:127.0.0.1:8081 -R 127.0.0.1:8001:127.0.0.1:8000 deploy@sip.classyra.com.ng; printf %s\\n Tunnel-disconnected-retrying-in-5-seconds; sleep 5; done'\" \"php artisan queue:work --queue=telephony,recordings,ai,outbound,payments,default --tries=5 --timeout=300 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,logs,vite --kill-others"
+            "@dev:cleanup-tunnel",
+            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"sh -c 'while true; do ssh -NT -i /home/abduljabbar/.ssh/netreverb-kamailio-tunnel -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o ConnectTimeout=15 -L 127.0.0.1:3307:127.0.0.1:3306 -L 127.0.0.1:8021:127.0.0.1:8021 -L 127.0.0.1:18081:127.0.0.1:8081 -L 127.0.0.1:7880:127.0.0.1:7880 -L 127.0.0.1:6379:127.0.0.1:6379 -R 127.0.0.1:8001:127.0.0.1:8000 deploy@sip.classyra.com.ng; printf %s\\n Tunnel-disconnected-retrying-in-5-seconds; sleep 5; done'\" \"php artisan queue:work --queue=telephony,recordings,ai,outbound,payments,default --tries=5 --timeout=300 --sleep=1\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,logs,vite --kill-others"
         ],
+        "dev:cleanup-tunnel": "sh scripts/cleanup-dev-tunnel.sh",
         "test": [
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"

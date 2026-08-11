@@ -30,6 +30,11 @@ Schedule::command('conference-rooms:reconcile-presence')
     ->onOneServer()
     ->withoutOverlapping();
 
+Schedule::command('conference-recordings:sync-tracks')
+    ->everyTenSeconds()
+    ->onOneServer()
+    ->withoutOverlapping();
+
 Schedule::job(new CleanupConferenceRecordings)
     ->daily()
     ->onOneServer()

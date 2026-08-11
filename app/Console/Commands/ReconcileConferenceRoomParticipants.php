@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Actions\ConferenceRooms\UpdateConferenceRoomParticipantPresence;
+use App\Actions\ConferenceRooms\UpdateConferenceRoomParticipantScreenShare;
 use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Enums\ConferenceParticipantStatus;
 use App\Enums\ConferenceRoomStatus;
@@ -23,10 +24,47 @@ class ReconcileConferenceRoomParticipants extends Command
         ConferenceLiveMemberResolver $conferenceLiveMemberResolver,
         UpdateConferenceRoomParticipantPresence $updateConferenceRoomParticipantPresence,
         ConferenceRoomParticipantPresenceService $participantPresenceService,
+        UpdateConferenceRoomParticipantScreenShare $updateConferenceRoomParticipantScreenShare,
     ): int {
         $threshold = now()->subSeconds((int) config('telephony.conference_participants.stale_after_seconds', 90));
         $missesBeforeLeave = max(1, (int) config('telephony.conference_participants.missed_reconciliations_before_leave', 2));
         $updatedCount = 0;
+
+        // Screen sharing starts with a second INVITE and may be requested only
+        // seconds after the room joins. Keep pinning independent of the stale
+        // participant sweep so the screen leg becomes the remote video floor
+        // as soon as FreeSWITCH reports it.
+        $screenShareRooms = ConferenceRoom::query()
+            ->where('status', ConferenceRoomStatus::Active)
+            ->whereHas('participants', fn ($query) => $query
+                ->primary()
+                ->where('status', ConferenceParticipantStatus::Joined->value)
+                ->where(function ($query): void {
+                    $query->where('metadata->screen_share->is_sharing', true)
+                        ->orWhere('metadata->screen_share->active', true);
+                }))
+            ->with(['participants' => fn ($query) => $query
+                ->primary()
+                ->where('status', ConferenceParticipantStatus::Joined->value)
+                ->with('screenShareParticipant')])
+            ->get();
+
+        foreach ($screenShareRooms as $conferenceRoom) {
+            foreach ($conferenceRoom->participants as $participant) {
+                if ($participant->screenShareParticipant === null) {
+                    continue;
+                }
+
+                try {
+                    $updateConferenceRoomParticipantScreenShare->pinScreenShareFloor(
+                        $conferenceRoom,
+                        $participant->screenShareParticipant,
+                    );
+                } catch (\Throwable $throwable) {
+                    report($throwable);
+                }
+            }
+        }
 
         $rooms = ConferenceRoom::query()
             ->where('status', ConferenceRoomStatus::Active)
@@ -37,7 +75,7 @@ class ReconcileConferenceRoomParticipants extends Command
                 'participants' => fn ($query) => $query
                     ->where('status', ConferenceParticipantStatus::Joined->value)
                     ->where('joined_at', '<=', $threshold)
-                    ->with(['user.extensions.dialableNumber']),
+                    ->with(['user.extensions.dialableNumber', 'screenShareParticipant']),
             ])
             ->get();
 
@@ -45,6 +83,16 @@ class ReconcileConferenceRoomParticipants extends Command
             $members = $freeSwitchConferenceGateway->listMembers($conferenceRoom->sip_number);
 
             foreach ($conferenceRoom->participants as $participant) {
+                $screenShare = $participant->screenShareParticipant;
+                $screenShareActive = (bool) data_get($participant->metadata, 'screen_share.is_sharing', data_get($participant->metadata, 'screen_share.active', false));
+                if ($screenShareActive && $screenShare !== null) {
+                    try {
+                        $updateConferenceRoomParticipantScreenShare->pinScreenShareFloor($conferenceRoom, $screenShare);
+                    } catch (\Throwable $throwable) {
+                        report($throwable);
+                    }
+                }
+
                 if ($conferenceLiveMemberResolver->findMemberForParticipant($participant, $members) !== null) {
                     $reconcileState = $this->reconcileState($participant);
 

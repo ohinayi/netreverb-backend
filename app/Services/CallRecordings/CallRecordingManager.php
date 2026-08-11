@@ -507,10 +507,22 @@ class CallRecordingManager
         CallRecordingProfile $profile,
         Carbon $recordedAt,
     ): CallLog {
+        // A call may contain more than one recording segment.  Once the
+        // previous segment is terminal, allocate a fresh id/path instead of
+        // reusing its metadata (which made the second Start request point at
+        // the already-completed recording).
+        $recordingStatus = $callLog->recording_status?->value ?? $callLog->recording_status;
+        $newRecordingSession = $recordingStatus !== null
+            && ! in_array($recordingStatus, [
+                CallRecordingStatus::Starting->value,
+                CallRecordingStatus::Recording->value,
+            ], true);
         $location = $this->storage->buildLocation($callLog, $callUuid, $profile, $recordedAt);
 
         $callLog->forceFill([
-            'recording_id' => $callLog->recording_id ?: (string) Str::ulid(),
+            'recording_id' => $newRecordingSession || ! $callLog->recording_id
+                ? (string) Str::ulid()
+                : $callLog->recording_id,
             'recording_uuid' => $callUuid,
             'recording_media_type' => $profile->mediaType,
             'recording_container' => $profile->container,
@@ -520,7 +532,7 @@ class CallRecordingManager
                 'organization' => $callLog->organization?->public_id ?? $callLog->organization_id,
                 'callLog' => $callLog->public_id,
             ]),
-            'recording_started_at' => $callLog->recording_started_at ?? $recordedAt,
+            'recording_started_at' => $newRecordingSession ? $recordedAt : ($callLog->recording_started_at ?? $recordedAt),
         ]);
 
         Log::info('Call recording metadata prepared.', [

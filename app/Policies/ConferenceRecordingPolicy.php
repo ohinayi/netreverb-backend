@@ -22,12 +22,12 @@ class ConferenceRecordingPolicy
 
     public function view(User $user, ConferenceRecording $conferenceRecording): bool
     {
-        return false;
+        return $this->canManage($user, $conferenceRecording->conferenceRoom()->value('organization_id') ?? 0);
     }
 
     public function create(User $user, Organization $organization): bool
     {
-        return false;
+        return $this->canManage($user, $organization->id);
     }
 
     public function update(User $user, ConferenceRecording $conferenceRecording): bool

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
@@ -16,8 +17,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'recording_id',
     'room_id',
     'call_id',
+    'egress_id',
     'file_path',
     'file_name',
+    'storage_key',
+    'download_url',
     'duration',
     'size',
     'status',
@@ -45,6 +49,12 @@ class ConferenceRecording extends Model
     {
         return $this->belongsTo(ConferenceRoom::class);
     }
+
+    public function tracks(): HasMany
+    {
+        return $this->hasMany(ConferenceRecordingTrack::class);
+    }
+
 
     protected function casts(): array
     {

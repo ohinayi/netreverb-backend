@@ -7,6 +7,7 @@ use App\Enums\ConferenceRoomStatus;
 use App\Models\ConferenceRoom;
 use App\Models\User;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
+use App\Services\ConferenceRecordings\LiveKitConferenceRecordingManager;
 use App\Services\ConferenceRooms\ConferenceRoomChatService;
 use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,7 @@ class EndConferenceRoom
 {
     public function __construct(
         private ConferenceRecordingManager $recordingManager,
+        private LiveKitConferenceRecordingManager $liveKitRecordingManager,
         private ConferenceRoomChatService $conferenceRoomChatService,
         private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
@@ -42,6 +44,7 @@ class EndConferenceRoom
         }, attempts: 3);
 
         $this->recordingManager->stop($conferenceRoom);
+        $this->liveKitRecordingManager->stopActiveForRoom($conferenceRoom);
         $this->conferenceRoomChatService->clearRoom($conferenceRoom);
         $this->participantPresenceService->clearRoom($conferenceRoom);
 

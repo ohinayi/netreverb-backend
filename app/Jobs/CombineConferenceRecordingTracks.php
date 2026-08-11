@@ -1,0 +1,199 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Enums\ConferenceRecordingStatus;
+use App\Enums\ConferenceRecordingTrackStatus;
+use App\Models\ConferenceRecording;
+use App\Models\ConferenceRecordingTrack;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
+use RuntimeException;
+use Throwable;
+
+/**
+ * Track Egress records each participant's mic/camera/screen-share as separate
+ * raw (non-transcoded) files — that's what keeps live per-recording CPU low,
+ * since nothing gets decoded or re-encoded while the call is happening. This
+ * job does the actual compositing instead, offline, after the call has ended,
+ * so the real encoding cost never competes with a live conference for CPU.
+ */
+class CombineConferenceRecordingTracks implements ShouldQueue
+{
+    use Dispatchable;
+    use Queueable;
+
+    private const CELL_WIDTH = 640;
+
+    private const CELL_HEIGHT = 360;
+
+    private const VIDEO_KINDS = ['camera', 'screen_share'];
+
+    private const AUDIO_KINDS = ['microphone', 'screen_share_audio'];
+
+    public function __construct(private readonly int $recordingId) {}
+
+    public function handle(): void
+    {
+        $recording = ConferenceRecording::query()->with('tracks')->find($this->recordingId);
+        if ($recording === null) {
+            return;
+        }
+
+        $completedTracks = $recording->tracks
+            ->where('status', ConferenceRecordingTrackStatus::Completed)
+            ->values();
+
+        if ($completedTracks->isEmpty()) {
+            $recording->forceFill(['status' => ConferenceRecordingStatus::Failed])->save();
+
+            return;
+        }
+
+        $workDir = storage_path('app/tmp/recording-combine/'.$recording->recording_id);
+        File::ensureDirectoryExists($workDir);
+        $disk = Storage::disk('livekit_recordings');
+
+        try {
+            $videoInputs = [];
+            $audioInputs = [];
+
+            foreach ($completedTracks as $index => $track) {
+                /** @var ConferenceRecordingTrack $track */
+                $extension = pathinfo($track->storage_key, PATHINFO_EXTENSION) ?: 'mp4';
+                $localPath = $workDir.'/track_'.$index.'.'.$extension;
+                File::put($localPath, $disk->get($track->storage_key));
+
+                if (in_array($track->kind, self::VIDEO_KINDS, true)) {
+                    $videoInputs[] = $localPath;
+                } elseif (in_array($track->kind, self::AUDIO_KINDS, true)) {
+                    $audioInputs[] = $localPath;
+                }
+            }
+
+            $outputPath = $workDir.'/combined.mp4';
+            $this->combine($videoInputs, $audioInputs, $outputPath);
+
+            $disk->put($recording->storage_key, File::get($outputPath));
+
+            $recording->forceFill([
+                'status' => ConferenceRecordingStatus::Completed,
+                'size' => File::size($outputPath),
+                'duration' => $completedTracks->max('duration') ?? $recording->duration,
+            ])->save();
+
+            foreach ($completedTracks as $track) {
+                $disk->delete(array_filter([$track->storage_key, $track->manifestStorageKey()]));
+            }
+        } catch (Throwable $exception) {
+            Log::error('Conference recording combine failed.', [
+                'recording_id' => $recording->recording_id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            $recording->forceFill(['status' => ConferenceRecordingStatus::Failed])->save();
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /**
+     * @param  list<string>  $videoInputs
+     * @param  list<string>  $audioInputs
+     */
+    private function combine(array $videoInputs, array $audioInputs, string $outputPath): void
+    {
+        $videoCount = count($videoInputs);
+        $audioCount = count($audioInputs);
+
+        if ($videoCount === 0 && $audioCount === 0) {
+            throw new RuntimeException('No usable tracks to combine.');
+        }
+
+        $args = ['ffmpeg', '-y'];
+        foreach ([...$videoInputs, ...$audioInputs] as $input) {
+            $args[] = '-i';
+            $args[] = $input;
+        }
+
+        $filters = [];
+        $maps = [];
+
+        if ($videoCount > 0) {
+            $cols = (int) ceil(sqrt($videoCount));
+
+            $layoutPositions = [];
+            for ($i = 0; $i < $videoCount; $i++) {
+                $filters[] = sprintf(
+                    '[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[v%d]',
+                    $i,
+                    self::CELL_WIDTH,
+                    self::CELL_HEIGHT,
+                    self::CELL_WIDTH,
+                    self::CELL_HEIGHT,
+                    $i,
+                );
+                $col = $i % $cols;
+                $row = intdiv($i, $cols);
+                $layoutPositions[] = ($col * self::CELL_WIDTH).'_'.($row * self::CELL_HEIGHT);
+            }
+
+            if ($videoCount === 1) {
+                $filters[] = '[v0]null[vout]';
+            } else {
+                $videoLabels = implode('', array_map(fn (int $i) => "[v{$i}]", range(0, $videoCount - 1)));
+                $filters[] = sprintf(
+                    '%sxstack=inputs=%d:layout=%s:fill=black[vout]',
+                    $videoLabels,
+                    $videoCount,
+                    implode('|', $layoutPositions),
+                );
+            }
+
+            $maps[] = '[vout]';
+        }
+
+        if ($audioCount > 0) {
+            $audioLabels = implode('', array_map(fn (int $i) => sprintf('[%d:a]', $videoCount + $i), range(0, $audioCount - 1)));
+            if ($audioCount === 1) {
+                $filters[] = "{$audioLabels}anull[aout]";
+            } else {
+                $filters[] = sprintf('%samix=inputs=%d:duration=longest:dropout_transition=0[aout]', $audioLabels, $audioCount);
+            }
+
+            $maps[] = '[aout]';
+        }
+
+        $args[] = '-filter_complex';
+        $args[] = implode(';', $filters);
+        foreach ($maps as $map) {
+            $args[] = '-map';
+            $args[] = $map;
+        }
+
+        if ($videoCount > 0) {
+            $args[] = '-c:v';
+            $args[] = 'libx264';
+            $args[] = '-preset';
+            $args[] = 'veryfast';
+        }
+        if ($audioCount > 0) {
+            $args[] = '-c:a';
+            $args[] = 'aac';
+        }
+
+        $args[] = $outputPath;
+
+        $result = Process::timeout(1800)->run($args);
+
+        if (! $result->successful()) {
+            throw new RuntimeException('ffmpeg combine failed: '.$result->errorOutput());
+        }
+    }
+}

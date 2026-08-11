@@ -94,7 +94,11 @@ class ConferenceRoomChatService
 
     public function isActiveParticipant(ConferenceRoom $conferenceRoom, User $user): bool
     {
-        return $this->resolveParticipant($conferenceRoom, $user)?->status === ConferenceParticipantStatus::Joined;
+        return in_array(
+            $this->resolveParticipant($conferenceRoom, $user)?->status,
+            [ConferenceParticipantStatus::Joined, ConferenceParticipantStatus::Disconnected],
+            true,
+        );
     }
 
     public function clearRoom(ConferenceRoom $conferenceRoom): void
@@ -132,7 +136,11 @@ class ConferenceRoomChatService
     {
         $participant = $this->resolveParticipant($conferenceRoom, $user);
 
-        if ($participant === null || $participant->status !== ConferenceParticipantStatus::Joined) {
+        if ($participant === null || ! in_array(
+            $participant->status,
+            [ConferenceParticipantStatus::Joined, ConferenceParticipantStatus::Disconnected],
+            true,
+        )) {
             throw new ConferenceRoomChatAccessDeniedException;
         }
 

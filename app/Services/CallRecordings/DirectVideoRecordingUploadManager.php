@@ -57,7 +57,24 @@ class DirectVideoRecordingUploadManager
                     ...$attributes,
                 ]);
             } else {
-                $upload->forceFill($attributes)->save();
+                // Reuse the one-to-one upload row, but reset it as a brand
+                // new segment after a completed/failed recording.  The call
+                // log already has a newly allocated recording_id and path.
+                $terminal = in_array($upload->status?->value ?? $upload->status, [
+                    CallRecordingUploadStatus::Completed->value,
+                    CallRecordingUploadStatus::Failed->value,
+                ], true);
+                $upload->forceFill([
+                    ...$attributes,
+                    'status' => $terminal ? CallRecordingUploadStatus::Pending : ($upload->status ?? CallRecordingUploadStatus::Pending),
+                    'next_sequence' => $terminal ? 0 : $upload->next_sequence,
+                    'uploaded_chunks_count' => $terminal ? 0 : $upload->uploaded_chunks_count,
+                    'uploaded_size' => $terminal ? 0 : $upload->uploaded_size,
+                    'upload_started_at' => $terminal ? null : $upload->upload_started_at,
+                    'last_chunk_received_at' => $terminal ? null : $upload->last_chunk_received_at,
+                    'upload_completed_at' => $terminal ? null : $upload->upload_completed_at,
+                    'finalized_at' => $terminal ? null : $upload->finalized_at,
+                ])->save();
             }
 
             return $upload->refresh();

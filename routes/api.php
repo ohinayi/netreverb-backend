@@ -20,11 +20,13 @@ use App\Http\Controllers\Api\V1\ExtensionController;
 use App\Http\Controllers\Api\V1\FriendshipController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\LeadFollowUpController;
+use App\Http\Controllers\Api\V1\LiveKitTokenController;
 use App\Http\Controllers\Api\V1\MessageController;
 use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\OrganizationIvrController;
 use App\Http\Controllers\Api\V1\OutboundCampaignController;
 use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
 use App\Http\Controllers\Api\V1\OutboundMessagingController;
@@ -45,14 +47,21 @@ use Illuminate\Support\Facades\Route;
 
 Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterConfigurationController::class)
     ->name('freeswitch.callcenter.configuration');
+Route::match(['get', 'post'], 'freeswitch/dialplan.xml', \App\Http\Controllers\FreeSwitchDialplanController::class)
+    ->name('freeswitch.dialplan.configuration');
+Route::match(['get', 'post'], 'freeswitch/dialplan-router.xml', \App\Http\Controllers\FreeSwitchDialplanRouterController::class)
+    ->name('freeswitch.dialplan.router');
 
 Route::prefix('v1')->group(function (): void {
     Route::post('payments/webhooks/{provider}', PaymentWebhookController::class)
         ->middleware('throttle:240,1')
         ->name('payments.webhooks');
-    Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
+Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('outbound.webhooks.delivery');
+    Route::post('conference-recordings/webhook', [ConferenceRecordingController::class, 'webhook'])
+        ->middleware('throttle:240,1')
+        ->name('conference-recordings.webhook');
     Route::post('auth/register', RegisteredUserController::class)
         ->middleware([StartSession::class, 'throttle:auth-registration']);
     Route::post('auth/resend-verification', EmailVerificationNotificationController::class)
@@ -110,6 +119,10 @@ Route::prefix('v1')->group(function (): void {
                 ->name('conference-rooms.join-by-invite');
             Route::post('conference-rooms/leave-by-invite', [ConferenceRoomController::class, 'leaveByInvite'])
                 ->name('conference-rooms.leave-by-invite');
+            Route::post(
+                'conference-rooms/{conferenceRoom}/livekit-token',
+                LiveKitTokenController::class,
+            )->name('conference-rooms.livekit-token');
             Route::get('conference-rooms/{conferenceRoom}/chat', [ConferenceRoomChatController::class, 'show'])
                 ->name('conference-rooms.chat.show');
             Route::get('conference-rooms/{conferenceRoom}/chat/stream', [ConferenceRoomChatController::class, 'stream'])
@@ -162,9 +175,14 @@ Route::prefix('v1')->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
                 Route::get('organizations/{organization}/audit-events', [AuditEventController::class, 'index'])
                     ->name('organizations.audit-events.index');
-                Route::apiResource('organizations.call-queues', CallQueueController::class)
+            Route::apiResource('organizations.call-queues', CallQueueController::class)
                     ->only(['index', 'store', 'update', 'destroy'])
                     ->parameters(['call-queues' => 'callQueue']);
+                Route::apiResource('organizations.ivrs', OrganizationIvrController::class)
+                    ->only(['index', 'store', 'show', 'update', 'destroy'])
+                    ->parameters(['ivrs' => 'ivr']);
+                Route::post('organizations/{organization}/ivrs/preview', [OrganizationIvrController::class, 'preview'])
+                    ->name('organizations.ivrs.preview');
                 Route::apiResource('organizations.leads', LeadController::class)
                     ->only(['index', 'store', 'update', 'destroy']);
                 Route::get('organizations/{organization}/leads/{lead}/activities', [LeadController::class, 'activities'])
@@ -257,6 +275,10 @@ Route::prefix('v1')->group(function (): void {
                     ->only(['index', 'store', 'show'])
                     ->parameters(['conference-rooms' => 'conferenceRoom']);
                 Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/livekit-token',
+                    LiveKitTokenController::class,
+                )->name('organizations.conference-rooms.livekit-token');
+                Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/join',
                     [ConferenceRoomController::class, 'join'],
                 )->name('organizations.conference-rooms.join');
@@ -336,10 +358,22 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/end',
                     [ConferenceRoomController::class, 'end'],
                 )->name('organizations.conference-rooms.end');
+                Route::get(
+                    'organizations/{organization}/conference-recordings',
+                    [ConferenceRecordingController::class, 'index'],
+                )->name('organizations.conference-recordings.index');
                 Route::delete(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/recordings/{conferenceRecording}',
                     [ConferenceRecordingController::class, 'destroy'],
                 )->name('organizations.conference-rooms.recordings.destroy');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/recording/start',
+                    [ConferenceRecordingController::class, 'start'],
+                )->name('organizations.conference-rooms.recording.start');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/recording/stop',
+                    [ConferenceRecordingController::class, 'stop'],
+                )->name('organizations.conference-rooms.recording.stop');
                 Route::post(
                     'organizations/{organization}/extensions/{extension}/credentials/rotate',
                     SipCredentialController::class,

@@ -3,6 +3,7 @@
 namespace App\Actions\ServiceNumbers;
 
 use App\Enums\DialableNumberType;
+use App\Enums\ProvisioningStatus;
 use App\Models\DialableNumber;
 use App\Models\Organization;
 use App\Models\ServiceNumber;
@@ -24,7 +25,10 @@ class CreateServiceNumber
                 'dialable_number_id' => $dialableNumber->id,
                 'name' => $attributes['name'],
                 'type' => $attributes['type'],
-                'target' => $attributes['target'],
+                'target' => $attributes['target'] ?? 'route_'.$attributes['type'].'_'.$attributes['number'],
+                'provisioning_status' => config('telephony.service_numbers.auto_activate')
+                    ? ProvisioningStatus::Active
+                    : ProvisioningStatus::Pending,
                 'enabled' => $attributes['enabled'] ?? true,
                 'configuration' => $attributes['configuration'] ?? null,
             ])->load('dialableNumber');

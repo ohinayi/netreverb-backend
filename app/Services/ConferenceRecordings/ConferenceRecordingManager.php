@@ -10,6 +10,7 @@ use App\Models\ConferenceRecording;
 use App\Models\ConferenceRoom;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -36,6 +37,7 @@ class ConferenceRecordingManager
                 ->whereIn('status', [
                     ConferenceRecordingStatus::Starting,
                     ConferenceRecordingStatus::Recording,
+                    ConferenceRecordingStatus::Stopping,
                 ])
                 ->lockForUpdate()
                 ->latest('id')
@@ -105,6 +107,7 @@ class ConferenceRecordingManager
                 ->whereIn('status', [
                     ConferenceRecordingStatus::Starting,
                     ConferenceRecordingStatus::Recording,
+                    ConferenceRecordingStatus::Stopping,
                 ])
                 ->lockForUpdate()
                 ->latest('id')
@@ -145,8 +148,44 @@ class ConferenceRecordingManager
 
     public function delete(ConferenceRecording $recording): void
     {
+        // LiveKit recordings live in the livekit_recordings S3 disk under
+        // storage_key, not the FreeSWITCH-only local disk $this->storage
+        // knows about — it would silently no-op for them, leaking the S3
+        // file forever while the DB row disappears. Purge that path too.
+        $this->deleteLiveKitFiles($recording);
         $this->storage->delete($recording);
         $recording->delete();
+    }
+
+    private function deleteLiveKitFiles(ConferenceRecording $recording): void
+    {
+        $disk = Storage::disk('livekit_recordings');
+
+        if ($recording->storage_key) {
+            $disk->delete($recording->storage_key);
+        }
+
+        foreach ($recording->tracks as $track) {
+            if ($track->storage_key) {
+                $disk->delete(array_filter([$track->storage_key, $track->manifestStorageKey()]));
+            }
+        }
+    }
+
+    /**
+     * A LiveKit recording's file_path is set to the same S3 key as
+     * storage_key (see LiveKitConferenceRecordingManager::start()), but
+     * $this->storage->exists() only ever checks the FreeSWITCH local disk —
+     * so for LiveKit rows it always returns false. Route existence checks
+     * through the right disk per row instead of assuming FreeSWITCH.
+     */
+    private function existsOnStorage(ConferenceRecording $recording): bool
+    {
+        if ($recording->storage_key) {
+            return Storage::disk('livekit_recordings')->exists($recording->storage_key);
+        }
+
+        return $this->storage->exists($recording);
     }
 
     public function cleanup(int $retentionDays): int
@@ -155,7 +194,7 @@ class ConferenceRecordingManager
         $deletedCount = 0;
 
         ConferenceRecording::query()
-            ->with('conferenceRoom')
+            ->with(['conferenceRoom', 'tracks'])
             ->whereNull('deleted_at')
             ->oldest('id')
             ->chunkById(100, function ($recordings) use ($cutoff, &$deletedCount): void {
@@ -163,7 +202,16 @@ class ConferenceRecordingManager
                     $conferenceRoom = $recording->conferenceRoom;
                     $shouldDelete = false;
 
-                    if (! $this->storage->exists($recording)) {
+                    // A LiveKit recording's storage_key is set the moment it
+                    // starts, long before Egress finalizes and uploads the
+                    // real S3 object — checking existence for Starting/
+                    // Recording/Stopping/Combining rows would always read
+                    // "missing" and wrongly orphan every in-progress
+                    // recording on the next nightly run. Only a status that
+                    // claims to already have a finished file can be orphaned
+                    // by a missing file.
+                    if ($recording->status === ConferenceRecordingStatus::Completed
+                        && ! $this->existsOnStorage($recording)) {
                         $recording->forceFill([
                             'status' => ConferenceRecordingStatus::Orphaned,
                         ])->save();
@@ -199,6 +247,7 @@ class ConferenceRecordingManager
                         continue;
                     }
 
+                    $this->deleteLiveKitFiles($recording);
                     $this->storage->delete($recording);
                     $recording->delete();
                     $deletedCount++;

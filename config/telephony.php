@@ -7,6 +7,11 @@ return [
     'websocket_url' => env('KAMAILIO_WS_URL', 'ws://sip.classyra.com.ng:8080'),
     'secure_websocket_url' => env('KAMAILIO_WSS_URL', 'wss://sip.classyra.com.ng:7443'),
     'sip_registration_expires' => (int) env('SIP_REGISTRATION_EXPIRES', 300),
+    // Until a DID/SIP-trunk provider is connected, local and test routes can
+    // be used immediately. Production should leave this disabled.
+    'service_numbers' => [
+        'auto_activate' => filter_var(env('SERVICE_NUMBERS_AUTO_ACTIVATE', false), FILTER_VALIDATE_BOOL),
+    ],
     'automatic_extension_start' => (int) env('AUTOMATIC_EXTENSION_START', 302984),
     'automatic_extension_end' => (int) env('AUTOMATIC_EXTENSION_END', 399999),
     'conference_number_start' => (int) env('CONFERENCE_NUMBER_START', 45000000000),
@@ -63,11 +68,24 @@ return [
             'trim',
             explode(',', (string) env('FREESWITCH_XML_CURL_ALLOWED_IPS', '127.0.0.1,::1')),
         ))),
+        // The production XML-cURL router can send selected development
+        // extensions through the reverse SSH tunnel while every other call
+        // continues to use production data. This keeps one permanent
+        // FreeSWITCH XML-CURL URL for both environments.
+        'xml_curl_local_test_extensions' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSIONS', '')),
+        ))),
+        'xml_curl_local_tunnel_url' => rtrim((string) env('FREESWITCH_XML_CURL_LOCAL_TUNNEL_URL', ''), '/'),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
         // Browser extensions are routed by the public dialplan.  Sending a
         // blind transfer to `default` hits its catch-all/sleep rule instead
         // of bridging the destination extension.
         'transfer_context' => env('FREESWITCH_TRANSFER_CONTEXT', 'public'),
+        // Optional URL used when FreeSWITCH cannot read the Laravel storage
+        // filesystem directly (for example local Laravel + VPS FreeSWITCH
+        // through an SSH reverse tunnel). Use http_cache:// for FreeSWITCH.
+        'ivr_audio_base_url' => rtrim((string) env('FREESWITCH_IVR_AUDIO_BASE_URL', ''), '/'),
     ],
     'turn' => [
         'secret' => env('TURN_SECRET'),

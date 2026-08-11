@@ -76,6 +76,21 @@ return [
             'report' => false,
         ],
 
+        // Same bucket/credentials Egress uploads track recordings to (see
+        // config/livekit.php). The combine job reads per-track files and
+        // writes the merged recording back here.
+        'livekit_recordings' => [
+            'driver' => 's3',
+            'key' => env('LIVEKIT_RECORDING_S3_ACCESS_KEY'),
+            'secret' => env('LIVEKIT_RECORDING_S3_SECRET'),
+            'region' => env('LIVEKIT_RECORDING_S3_REGION', 'us-east-1'),
+            'bucket' => env('LIVEKIT_RECORDING_BUCKET', 'netreverb-recordings'),
+            'endpoint' => env('LIVEKIT_RECORDING_S3_ENDPOINT', 'http://127.0.0.1:9000'),
+            'use_path_style_endpoint' => true,
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*
