@@ -40,6 +40,7 @@ class CallLogResource extends JsonResource
             'callee_number' => $this->callee_number,
             'status' => $this->status,
             'media_type' => $this->media_type,
+            'video_upgrade_status' => $attributes['video_upgrade_status'] ?? null,
             'session_type' => $this->session_type,
             'direction' => $callPerspective['direction'],
             'party_status' => $callPerspective['party_status'],

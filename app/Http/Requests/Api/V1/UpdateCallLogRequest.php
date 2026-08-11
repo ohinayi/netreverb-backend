@@ -22,6 +22,7 @@ class UpdateCallLogRequest extends FormRequest
         return [
             'freeswitch_uuid' => ['sometimes', 'nullable', 'string', 'max:64'],
             'reset_freeswitch_uuid' => ['sometimes', 'boolean'],
+            'video_upgrade_status' => ['sometimes', 'nullable', Rule::in(['requested', 'video_ready'])],
             'status' => ['sometimes', Rule::enum(CallStatus::class)],
             'media_type' => ['sometimes', Rule::enum(CallMediaType::class)],
             'session_type' => ['sometimes', Rule::enum(CallSessionType::class)],

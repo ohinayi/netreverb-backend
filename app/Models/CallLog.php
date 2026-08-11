@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'callee_number',
     'status',
     'media_type',
+    'video_upgrade_status',
     'session_type',
     'duration',
     'freeswitch_uuid',
