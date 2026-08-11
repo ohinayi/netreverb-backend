@@ -263,8 +263,30 @@ class CallLogController extends Controller
         $data = $request->validated();
         $recordingWasActive = in_array($callLog->recording_status, [CallRecordingStatus::Starting, CallRecordingStatus::Recording], true);
 
+        // An audio-to-video upgrade replaces the whole SIP session with a
+        // brand new INVITE (SipCallingClient::requestVideoUpgrade/
+        // acceptVideoUpgrade) rather than a true in-dialog re-INVITE, so
+        // FreeSWITCH assigns the video leg an entirely new channel UUID and
+        // tears down the old one. FreeSwitchCallUuidSynchronizer only ever
+        // matches a call log whose freeswitch_uuid is still NULL - once set,
+        // it is never replaced, even when the channel it points at is long
+        // gone. Without an explicit way to forget it, this call log was
+        // permanently stuck on the dead audio-leg UUID for the rest of the
+        // call, and every subsequent "start recording" attempt failed with
+        // FreeSWITCH's own "Cannot locate session!" for a channel that no
+        // longer exists. reset_freeswitch_uuid is how the frontend tells us
+        // the underlying channel just changed out from under this call log -
+        // clearing it lets the same sync job that resolved it the first time
+        // resolve it again for the new channel.
+        $resetFreeSwitchUuid = (bool) ($data['reset_freeswitch_uuid'] ?? false);
+        unset($data['reset_freeswitch_uuid']);
+
         if (array_key_exists('freeswitch_uuid', $data) && $data['freeswitch_uuid'] === null) {
             unset($data['freeswitch_uuid']);
+        }
+
+        if ($resetFreeSwitchUuid) {
+            $data['freeswitch_uuid'] = null;
         }
 
         $data = $this->stripDuplicateFreeSwitchUuid($data, $callLog);
