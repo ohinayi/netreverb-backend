@@ -49,6 +49,9 @@ class TicketController extends Controller
             'contact_phone' => ['nullable', 'string', 'max:40'],
             'contact_email' => ['nullable', 'email', 'max:150'],
             'priority' => ['nullable', Rule::in(array_column(TicketPriority::cases(), 'value'))],
+            'due_at' => ['nullable', 'date'],
+            'tags' => ['nullable', 'array', 'max:10'],
+            'tags.*' => ['string', 'max:30'],
             'call_log_id' => ['nullable', 'string', Rule::exists('call_logs', 'public_id')->where(fn ($query) => $query->where('organization_id', $organization->id))],
             'lead_id' => ['nullable', 'string', Rule::exists('leads', 'public_id')->where(fn ($query) => $query->where('organization_id', $organization->id))],
             'assignee_user_id' => ['nullable', 'string', $this->activeMemberRule($organization)],
@@ -105,6 +108,9 @@ class TicketController extends Controller
             'subject' => ['sometimes', 'string', 'max:255'],
             'status' => ['sometimes', Rule::in(array_column(TicketStatus::cases(), 'value'))],
             'priority' => ['sometimes', Rule::in(array_column(TicketPriority::cases(), 'value'))],
+            'due_at' => ['sometimes', 'nullable', 'date'],
+            'tags' => ['sometimes', 'nullable', 'array', 'max:10'],
+            'tags.*' => ['string', 'max:30'],
             'contact_name' => ['nullable', 'string', 'max:150'],
             'contact_phone' => ['nullable', 'string', 'max:40'],
             'contact_email' => ['nullable', 'email', 'max:150'],
@@ -120,6 +126,36 @@ class TicketController extends Controller
         $ticket->update($data);
 
         return TicketResource::make($ticket->load(['assignee', 'creator', 'callLog', 'messages.author']));
+    }
+
+    public function bulkUpdate(Request $request, Organization $organization): AnonymousResourceCollection
+    {
+        $this->authorizeOrganization($organization);
+
+        $data = $request->validate([
+            'ticket_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'ticket_ids.*' => ['string'],
+            'status' => ['sometimes', Rule::in(array_column(TicketStatus::cases(), 'value'))],
+            'priority' => ['sometimes', Rule::in(array_column(TicketPriority::cases(), 'value'))],
+            'assignee_user_id' => ['sometimes', 'nullable', 'string', $this->activeMemberRule($organization)],
+        ]);
+
+        $tickets = $organization->tickets()->whereIn('public_id', $data['ticket_ids'])->get();
+
+        $updates = array_intersect_key($data, array_flip(['status', 'priority']));
+        if (array_key_exists('assignee_user_id', $data)) {
+            $updates['assignee_user_id'] = $data['assignee_user_id'] !== null
+                ? \App\Models\User::where('public_id', $data['assignee_user_id'])->value('id')
+                : null;
+        }
+
+        if ($updates !== []) {
+            foreach ($tickets as $ticket) {
+                $ticket->update($updates);
+            }
+        }
+
+        return TicketResource::collection($tickets->fresh(['assignee', 'creator', 'callLog']));
     }
 
     public function destroy(Organization $organization, Ticket $ticket): Response

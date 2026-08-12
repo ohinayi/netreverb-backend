@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'organization_id', 'call_log_id', 'lead_id',
     'contact_name', 'contact_phone', 'contact_email',
-    'subject', 'status', 'priority',
+    'subject', 'status', 'priority', 'due_at', 'tags',
     'assignee_user_id', 'created_by_user_id',
 ])]
 class Ticket extends Model
@@ -66,6 +66,8 @@ class Ticket extends Model
         return [
             'status' => TicketStatus::class,
             'priority' => TicketPriority::class,
+            'due_at' => 'datetime',
+            'tags' => 'array',
         ];
     }
 }

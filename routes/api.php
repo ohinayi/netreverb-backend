@@ -290,6 +290,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                     ->name('organizations.notes.index');
                 Route::get('organizations/{organization}/recordings', [RecordingController::class, 'index'])
                     ->name('organizations.recordings.index');
+                Route::patch('organizations/{organization}/tickets/bulk', [TicketController::class, 'bulkUpdate'])
+                    ->name('organizations.tickets.bulk');
                 Route::apiResource('organizations.tickets', TicketController::class);
                 Route::get('organizations/{organization}/tickets/{ticket}/messages', [TicketController::class, 'messages'])
                     ->name('organizations.tickets.messages.index');

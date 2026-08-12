@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Enums\TicketStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -12,11 +13,16 @@ class TicketResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $isOpenState = ! in_array($this->status, [TicketStatus::Resolved, TicketStatus::Closed], true);
+
         return [
             'id' => $this->public_id,
             'subject' => $this->subject,
             'status' => $this->status,
             'priority' => $this->priority,
+            'due_at' => $this->due_at,
+            'overdue' => $isOpenState && $this->due_at !== null && $this->due_at->isPast(),
+            'tags' => $this->tags ?? [],
             'contact_name' => $this->contact_name,
             'contact_phone' => $this->contact_phone,
             'contact_email' => $this->contact_email,
