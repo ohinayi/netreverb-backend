@@ -111,6 +111,16 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(20)->by('password-reset-ip:'.$request->ip()),
         ]);
 
+        RateLimiter::for('oauth-redirect', fn (Request $request): array => [
+            Limit::perMinute(10)->by('oauth-redirect:'.Str::lower((string) $request->route('provider')).':'.$request->ip()),
+            Limit::perMinute(30)->by('oauth-redirect-ip:'.$request->ip()),
+        ]);
+
+        RateLimiter::for('oauth-callback', fn (Request $request): array => [
+            Limit::perMinute(10)->by('oauth-callback:'.Str::lower((string) $request->route('provider')).':'.$request->ip()),
+            Limit::perMinute(30)->by('oauth-callback-ip:'.$request->ip()),
+        ]);
+
         RateLimiter::for('message-send', fn (Request $request): array => [
             Limit::perMinute(60)->by('message-user:'.($request->user()?->getAuthIdentifier() ?? $request->ip())),
             Limit::perMinute(180)->by('message-ip:'.$request->ip()),

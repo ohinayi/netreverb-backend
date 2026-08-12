@@ -32,5 +32,17 @@ class IndividualUserSeeder extends Seeder
                 'password' => 'password',
             ]
         );
+
+	User::query()->updateOrCreate(
+            ['email' => 'individual4@example.com'],
+            [
+                'name' => 'Fourth Individual User',
+                'account_type' => AccountType::Individual,
+                'email_verified_at' => now(),
+                'terms_accepted_at' => now(),
+                'password' => 'V7!qR2#nL9@xK4$z',
+            ]
+        );
+
     }
 }

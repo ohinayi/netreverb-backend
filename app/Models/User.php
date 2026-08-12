@@ -107,6 +107,11 @@ class User extends Authenticatable implements MustVerifyEmailContract
         return $this->hasMany(CommunityMembership::class);
     }
 
+    public function socialAccounts(): HasMany
+    {
+        return $this->hasMany(SocialAccount::class);
+    }
+
     public function createdCommunities(): HasMany
     {
         return $this->hasMany(Community::class, 'owner_user_id');

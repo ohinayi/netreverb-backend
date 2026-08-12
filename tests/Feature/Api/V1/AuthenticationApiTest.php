@@ -11,6 +11,8 @@ use App\Notifications\VerifyEmailNotification;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Notification;
+use Laravel\Socialite\Facades\Socialite;
+use Mockery;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -178,6 +180,62 @@ class AuthenticationApiTest extends TestCase
         $this->getJson('/api/v1/me')->assertUnauthorized();
     }
 
+    public function test_google_oauth_updates_an_existing_users_name_from_the_provider_profile(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Sulaimon John',
+            'email' => 'person@example.com',
+            'email_verified_at' => now(),
+        ]);
+
+        $googleUser = $this->fakeGoogleUser([
+            'id' => 'google-123',
+            'name' => 'Grace Hopper',
+            'email' => $user->email,
+            'avatar' => 'https://example.com/grace.jpg',
+        ]);
+
+        $this->mockGoogleDriver($googleUser);
+
+        $this->withSession(['oauth.redirect' => '/app/home'])
+            ->get('/auth/oauth/google/callback')
+            ->assertRedirect('http://localhost:5174/auth/oauth/callback?provider=google&status=success&redirect=%2Fapp%2Fhome');
+
+        $this->assertSame('Grace Hopper', $user->refresh()->name);
+    }
+
+    public function test_google_oauth_updates_an_linked_users_name_from_the_provider_profile(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Sulaimon John',
+            'email' => 'person@example.com',
+            'email_verified_at' => now(),
+        ]);
+        $user->socialAccounts()->create([
+            'provider' => 'google',
+            'provider_user_id' => 'google-123',
+            'avatar_url' => null,
+            'access_token' => null,
+            'refresh_token' => null,
+            'expires_at' => null,
+        ]);
+
+        $googleUser = $this->fakeGoogleUser([
+            'id' => 'google-123',
+            'name' => 'Grace Hopper',
+            'email' => $user->email,
+            'avatar' => 'https://example.com/grace.jpg',
+        ]);
+
+        $this->mockGoogleDriver($googleUser);
+
+        $this->withSession(['oauth.redirect' => '/app/home'])
+            ->get('/auth/oauth/google/callback')
+            ->assertRedirect('http://localhost:5174/auth/oauth/callback?provider=google&status=success&redirect=%2Fapp%2Fhome');
+
+        $this->assertSame('Grace Hopper', $user->refresh()->name);
+    }
+
     /** @return array<string, mixed> */
     private function registrationPayload(): array
     {
@@ -193,5 +251,36 @@ class AuthenticationApiTest extends TestCase
             'terms_accepted' => true,
             'device_name' => 'browser',
         ];
+    }
+
+    /** @param array{id: string, name: string, email: string, avatar: string} $attributes */
+    private function fakeGoogleUser(array $attributes): \Laravel\Socialite\Contracts\User
+    {
+        return \Laravel\Socialite\Two\User::fake([
+            'id' => $attributes['id'],
+            'name' => $attributes['name'],
+            'email' => $attributes['email'],
+            'avatar' => $attributes['avatar'],
+            'nickname' => null,
+            'user' => [
+                'email_verified' => true,
+            ],
+            'token' => 'fake-token',
+            'refreshToken' => 'fake-refresh-token',
+            'expiresIn' => 3600,
+        ]);
+    }
+
+    private function mockGoogleDriver(\Laravel\Socialite\Contracts\User $googleUser): void
+    {
+        $driver = Mockery::mock();
+        $driver->shouldReceive('user')
+            ->once()
+            ->andReturn($googleUser);
+
+        Socialite::shouldReceive('driver')
+            ->once()
+            ->with('google')
+            ->andReturn($driver);
     }
 }
