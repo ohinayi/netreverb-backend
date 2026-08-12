@@ -8,7 +8,6 @@ use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
 use App\Models\Organization;
 use App\Models\User;
-use App\Services\ConferenceRecordings\ConferenceRecordingManager;
 use App\Services\ConferenceRooms\ConferenceRoomParticipantPresenceService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +19,6 @@ class CreateConferenceRoom
     public function __construct(
         private AllocateConferenceRoomNumber $allocateConferenceRoomNumber,
         private GenerateConferenceRoomInviteCode $generateConferenceRoomInviteCode,
-        private ConferenceRecordingManager $recordingManager,
         private ConferenceRoomParticipantPresenceService $participantPresenceService,
     ) {}
 
@@ -80,7 +78,6 @@ class CreateConferenceRoom
         $this->participantPresenceService->touchHeartbeat(
             $conferenceRoom->participants()->whereBelongsTo($host)->sole(),
         );
-        $this->recordingManager->start($conferenceRoom);
 
         return $conferenceRoom;
     }

@@ -6,14 +6,12 @@ use App\Enums\ConferenceParticipantStatus;
 use App\Events\ConferenceRoomParticipantPresenceUpdated;
 use App\Models\ConferenceRoom;
 use App\Models\ConferenceRoomParticipant;
-use App\Services\ConferenceRecordings\ConferenceRecordingManager;
 use App\Services\ConferenceRecordings\LiveKitConferenceRecordingManager;
 use Illuminate\Support\Facades\DB;
 
 class UpdateConferenceRoomParticipantPresence
 {
     public function __construct(
-        private ConferenceRecordingManager $recordingManager,
         private LiveKitConferenceRecordingManager $liveKitRecordingManager,
     ) {}
 
@@ -68,7 +66,6 @@ class UpdateConferenceRoomParticipantPresence
         }, attempts: 3);
 
         if ($shouldStopRecording) {
-            $this->recordingManager->stop($participant->conferenceRoom);
             $this->liveKitRecordingManager->stopActiveForRoom($participant->conferenceRoom);
         }
 
