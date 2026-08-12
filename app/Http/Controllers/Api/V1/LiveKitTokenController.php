@@ -13,7 +13,6 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Livekit\TrackSource;
 use Symfony\Component\HttpFoundation\Response;
 
 class LiveKitTokenController extends Controller
@@ -70,12 +69,18 @@ class LiveKitTokenController extends Controller
                 'moderation_video_muted' => $moderation['video_muted_by_host'] ? '1' : '',
             ]);
 
-        $publishSources = [TrackSource::MICROPHONE, TrackSource::CAMERA, TrackSource::SCREEN_SHARE, TrackSource::SCREEN_SHARE_AUDIO];
+        // VideoGrant::setCanPublishSources() serializes these directly into the
+        // JWT's video.canPublishSources claim, which LiveKit's server expects
+        // as source *name* strings - not the Livekit\TrackSource protobuf enum
+        // ints. Passing the enum ints here JSON-encodes to e.g. [2,1,3,4],
+        // which LiveKit's Go JWT parser rejects with "token is malformed"
+        // (it unmarshals straight into a []string), so every token failed.
+        $publishSources = ['microphone', 'camera', 'screen_share', 'screen_share_audio'];
         if ($moderation['audio_muted_by_host']) {
-            $publishSources = array_values(array_diff($publishSources, [TrackSource::MICROPHONE]));
+            $publishSources = array_values(array_diff($publishSources, ['microphone']));
         }
         if ($moderation['video_muted_by_host']) {
-            $publishSources = array_values(array_diff($publishSources, [TrackSource::CAMERA]));
+            $publishSources = array_values(array_diff($publishSources, ['camera']));
         }
 
         $grant = (new VideoGrant())
