@@ -32,6 +32,16 @@ class CombineConferenceRecordingTracks implements ShouldQueue
 
     private const CELL_HEIGHT = 360;
 
+    private const MAIN_WIDTH = 1280;
+
+    private const MAIN_HEIGHT = 720;
+
+    private const THUMB_WIDTH = 320;
+
+    private const THUMB_HEIGHT = 180;
+
+    private const THUMB_MARGIN = 16;
+
     private const VIDEO_KINDS = ['camera', 'screen_share'];
 
     private const AUDIO_KINDS = ['microphone', 'screen_share_audio'];
@@ -78,7 +88,7 @@ class CombineConferenceRecordingTracks implements ShouldQueue
                 // row's created_at is when its egress actually began, so use
                 // the gap from the recording's own start as an -itsoffset.
                 $offsetSeconds = max(0, $track->created_at?->getTimestamp() - $recording->created_at->getTimestamp());
-                $input = ['path' => $localPath, 'offset' => $offsetSeconds];
+                $input = ['path' => $localPath, 'offset' => $offsetSeconds, 'kind' => $track->kind];
 
                 if (in_array($track->kind, self::VIDEO_KINDS, true)) {
                     $videoInputs[] = $input;
@@ -141,34 +151,31 @@ class CombineConferenceRecordingTracks implements ShouldQueue
         $maps = [];
 
         if ($videoCount > 0) {
-            $cols = (int) ceil(sqrt($videoCount));
-
-            $layoutPositions = [];
-            for ($i = 0; $i < $videoCount; $i++) {
-                $filters[] = sprintf(
-                    '[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[v%d]',
-                    $i,
-                    self::CELL_WIDTH,
-                    self::CELL_HEIGHT,
-                    self::CELL_WIDTH,
-                    self::CELL_HEIGHT,
-                    $i,
-                );
-                $col = $i % $cols;
-                $row = intdiv($i, $cols);
-                $layoutPositions[] = ($col * self::CELL_WIDTH).'_'.($row * self::CELL_HEIGHT);
+            $screenIndices = [];
+            $cameraIndices = [];
+            foreach ($videoInputs as $i => $input) {
+                if ($input['kind'] === 'screen_share') {
+                    $screenIndices[] = $i;
+                } else {
+                    $cameraIndices[] = $i;
+                }
             }
 
-            if ($videoCount === 1) {
-                $filters[] = '[v0]null[vout]';
-            } else {
-                $videoLabels = implode('', array_map(fn (int $i) => "[v{$i}]", range(0, $videoCount - 1)));
+            if ($screenIndices !== [] && ($cameraIndices !== [] || count($screenIndices) > 1)) {
+                // A screen share squeezed into the same small grid cell as a
+                // webcam is unreadable - give it the full frame instead and
+                // ride everyone else along the bottom as small thumbnails.
+                $this->buildSpotlightFilters($filters, array_shift($screenIndices), [...$screenIndices, ...$cameraIndices]);
+            } elseif ($videoCount === 1) {
                 $filters[] = sprintf(
-                    '%sxstack=inputs=%d:layout=%s:fill=black[vout]',
-                    $videoLabels,
-                    $videoCount,
-                    implode('|', $layoutPositions),
+                    '[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[vout]',
+                    self::MAIN_WIDTH,
+                    self::MAIN_HEIGHT,
+                    self::MAIN_WIDTH,
+                    self::MAIN_HEIGHT,
                 );
+            } else {
+                $this->buildGridFilters($filters, $videoCount);
             }
 
             $maps[] = '[vout]';
@@ -209,6 +216,88 @@ class CombineConferenceRecordingTracks implements ShouldQueue
 
         if (! $result->successful()) {
             throw new RuntimeException('ffmpeg combine failed: '.$result->errorOutput());
+        }
+    }
+
+    /**
+     * Equal-size grid, used when there's no screen share to spotlight (just
+     * one or more camera feeds).
+     *
+     * @param  list<string>  &$filters
+     */
+    private function buildGridFilters(array &$filters, int $videoCount): void
+    {
+        $cols = (int) ceil(sqrt($videoCount));
+        $layoutPositions = [];
+
+        for ($i = 0; $i < $videoCount; $i++) {
+            $filters[] = sprintf(
+                '[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[v%d]',
+                $i,
+                self::CELL_WIDTH,
+                self::CELL_HEIGHT,
+                self::CELL_WIDTH,
+                self::CELL_HEIGHT,
+                $i,
+            );
+            $col = $i % $cols;
+            $row = intdiv($i, $cols);
+            $layoutPositions[] = ($col * self::CELL_WIDTH).'_'.($row * self::CELL_HEIGHT);
+        }
+
+        $videoLabels = implode('', array_map(fn (int $i): string => "[v{$i}]", range(0, $videoCount - 1)));
+        $filters[] = sprintf(
+            '%sxstack=inputs=%d:layout=%s:fill=black[vout]',
+            $videoLabels,
+            $videoCount,
+            implode('|', $layoutPositions),
+        );
+    }
+
+    /**
+     * Screen share fills the full frame; everyone else rides along the
+     * bottom edge as small thumbnails, right to left.
+     *
+     * @param  list<string>  &$filters
+     * @param  list<int>  $thumbInputIndices
+     */
+    private function buildSpotlightFilters(array &$filters, int $mainInputIndex, array $thumbInputIndices): void
+    {
+        $filters[] = sprintf(
+            '[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[main]',
+            $mainInputIndex,
+            self::MAIN_WIDTH,
+            self::MAIN_HEIGHT,
+            self::MAIN_WIDTH,
+            self::MAIN_HEIGHT,
+        );
+
+        if ($thumbInputIndices === []) {
+            $filters[] = '[main]null[vout]';
+
+            return;
+        }
+
+        $current = '[main]';
+        $lastPosition = count($thumbInputIndices) - 1;
+
+        foreach (array_values($thumbInputIndices) as $position => $inputIndex) {
+            $filters[] = sprintf(
+                '[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[thumb%d]',
+                $inputIndex,
+                self::THUMB_WIDTH,
+                self::THUMB_HEIGHT,
+                self::THUMB_WIDTH,
+                self::THUMB_HEIGHT,
+                $position,
+            );
+
+            $x = self::MAIN_WIDTH - self::THUMB_MARGIN - (self::THUMB_WIDTH + self::THUMB_MARGIN) * ($position + 1);
+            $y = self::MAIN_HEIGHT - self::THUMB_HEIGHT - self::THUMB_MARGIN;
+            $next = $position === $lastPosition ? '[vout]' : "[stack{$position}]";
+
+            $filters[] = sprintf('%s[thumb%d]overlay=x=%d:y=%d%s', $current, $position, $x, $y, $next);
+            $current = $next;
         }
     }
 }
