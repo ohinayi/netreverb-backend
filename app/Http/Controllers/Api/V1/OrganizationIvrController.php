@@ -31,6 +31,7 @@ class OrganizationIvrController extends Controller
         $ivr = $organization->ivrs()->create(collect($data)->except(['options', 'service_number_id'])->all());
         $ivr->options()->createMany($data['options'] ?? []);
         $this->synthesizePrompt($ivr, $data['options'] ?? []);
+        $this->synthesizeDirectives($ivr);
         $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
         $configuration = $service->configuration ?? [];
         $configuration['ivr_public_id'] = $ivr->public_id;
@@ -53,6 +54,7 @@ class OrganizationIvrController extends Controller
             $ivr->options()->createMany($data['options'] ?? []);
         }
         $this->synthesizePrompt($ivr, $data['options'] ?? $ivr->options()->get()->toArray());
+        $this->synthesizeDirectives($ivr);
         return response()->json(['data' => $ivr->load('options')]);
     }
 
@@ -83,14 +85,26 @@ class OrganizationIvrController extends Controller
             'timeout_seconds' => ['nullable', 'integer', 'min:1', 'max:30'], 'enabled' => ['sometimes', 'boolean'],
             'options' => ['sometimes', 'array', 'max:10'], 'options.*.digit' => ['required', 'regex:/^[0-9*#]$/'],
             'options.*.label' => ['required', 'string', 'max:120'],
-            'options.*.destination_type' => ['required', Rule::in(['extension', 'queue', 'conference', 'external', 'announcement', 'hangup'])],
+            'options.*.destination_type' => ['required', Rule::in(['extension', 'queue', 'conference', 'external', 'announcement', 'hangup', 'submenu', 'directive'])],
             'options.*.destination' => ['nullable', 'string', 'max:255'], 'options.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:99'],
+            'options.*.directive_text' => ['nullable', 'string', 'max:2000'],
             'options.*.enabled' => ['sometimes', 'boolean'],
         ]);
         if ($creating) {
             $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->first();
             if (! $service || ! $service->enabled) {
                 throw ValidationException::withMessages(['service_number_id' => 'Select an active service number assigned to this organization.']);
+            }
+        }
+        foreach ($data['options'] ?? [] as $index => $option) {
+            if ($option['destination_type'] === 'submenu') {
+                $exists = $organization->ivrs()->where('public_id', $option['destination'] ?? null)->exists();
+                if (! $exists) {
+                    throw ValidationException::withMessages(["options.{$index}.destination" => 'Select an existing IVR menu in this organization to nest as a submenu.']);
+                }
+            }
+            if ($option['destination_type'] === 'directive' && ! trim($option['directive_text'] ?? '')) {
+                throw ValidationException::withMessages(["options.{$index}.directive_text" => 'Enter the message to play for this directive.']);
             }
         }
         return $data;
@@ -125,6 +139,28 @@ class OrganizationIvrController extends Controller
         $text = trim($ivr->welcome_text.'. '.$menu);
         $generated = app(PiperTtsService::class)->generate($text, $generatedPath, $ivr->tts_voice, $ivr->tts_speed);
         if ($generated) $ivr->update(['welcome_audio_path' => $generated]);
+    }
+
+    /**
+     * Pre-generates the TTS audio for every 'directive' option, the same
+     * way synthesizePrompt() does for the welcome prompt: once at save time
+     * so a live call only ever plays a cached file.
+     */
+    private function synthesizeDirectives(OrganizationIvr $ivr): void
+    {
+        foreach ($ivr->options as $option) {
+            if ($option->destination_type !== 'directive') continue;
+            $generatedPath = 'ivr-directive/'.$ivr->organization->public_id.'/'.$ivr->public_id.'-'.$option->digit.'.wav';
+            if (! $option->directive_text) {
+                if ($option->directive_audio_path === $generatedPath) {
+                    Storage::disk('public')->delete($generatedPath);
+                    $option->update(['directive_audio_path' => null]);
+                }
+                continue;
+            }
+            $generated = app(PiperTtsService::class)->generate($option->directive_text, $generatedPath, $ivr->tts_voice, $ivr->tts_speed);
+            if ($generated) $option->update(['directive_audio_path' => $generated]);
+        }
     }
 
     public function preview(Request $request, Organization $organization)

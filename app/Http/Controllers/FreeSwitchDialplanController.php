@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\OrganizationIvr;
+use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
 use Illuminate\Http\Request;
 
@@ -83,58 +84,8 @@ class FreeSwitchDialplanController extends Controller
         $actions->setAttribute('application', 'answer');
 
         if ($ivr) {
-            // Give the caller a short moment after answering before speech
-            // starts; this avoids clipping the first syllables on SIP/WebRTC
-            // endpoints that are still opening their audio element.
-            $pause = $condition->appendChild($xml->createElement('action'));
-            $pause->setAttribute('application', 'sleep');
-            $pause->setAttribute('data', '1500');
-
-            $generatedPrompt = $ivr->welcome_audio_path
-                && str_ends_with($ivr->welcome_audio_path, '/'.$ivr->public_id.'.wav');
-            if ($ivr->welcome_audio_path) {
-                $action = $condition->appendChild($xml->createElement('action'));
-                $action->setAttribute('application', 'playback');
-                $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
-                $audioPath = $audioBaseUrl !== ''
-                    ? $audioBaseUrl.'/storage/'.ltrim($ivr->welcome_audio_path, '/')
-                    : storage_path('app/public/'.$ivr->welcome_audio_path);
-                $action->setAttribute('data', $audioPath);
-            } elseif ($ivr->welcome_text) {
-                $action = $condition->appendChild($xml->createElement('action'));
-                $action->setAttribute('application', 'speak');
-                // FreeSWITCH's speak application expects the TTS engine first,
-                // followed by the voice and text.  `en|...` is not an engine
-                // and causes the channel to fail before the caller hears the
-                // prompt when mod_flite is the installed provider.
-                $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $ivr->welcome_text));
-            }
-            $options = $ivr->options()->where('enabled', true)->orderBy('sort_order')->get();
-            if ($options->isNotEmpty()) {
-                $optionsContextName = $this->optionsContextName($ivr);
-
-                if (! $generatedPrompt) {
-                    $menuText = ' Please choose an option. ' . $options
-                        ->map(fn ($option): string => 'Press '.$option->digit.' for '.$option->label.'.')
-                        ->implode(' ');
-                    $action = $condition->appendChild($xml->createElement('action'));
-                    $action->setAttribute('application', 'speak');
-                    $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $menuText));
-                }
-
-                // Read the digit once. The previous implementation appended a
-                // read/execute pair for every option, which immediately
-                // executed option 1 and then option 2 and ended the call.
-                $action = $condition->appendChild($xml->createElement('action'));
-                $action->setAttribute('application', 'read');
-                // read syntax: min, max, prompt, variable, timeout(ms),
-                // terminator. The previous order made FreeSWITCH interpret
-                // the timeout ("5") as a sound filename (5.wav).
-                $action->setAttribute('data', '1 1 silence_stream://1000 ivr_digit '.max(10000, ((int) $ivr->timeout_seconds * 1000)).' #');
-                $action = $condition->appendChild($xml->createElement('action'));
-                $action->setAttribute('application', 'transfer');
-                $action->setAttribute('data', '${ivr_digit} XML '.$optionsContextName);
-
+            $options = $this->appendMenuActions($xml, $condition, $ivr);
+            if ($options) {
                 // Keep the menu choices out of the public dialplan. A public
                 // context contains other catch-all routes, so resolving `1`
                 // there can select an unrelated extension instead of this
@@ -143,8 +94,8 @@ class FreeSwitchDialplanController extends Controller
                 // re-fetching; ivrOptionResponse() below is what actually
                 // serves the `transfer ... XML ivr-options-...` re-fetch.
                 $optionsContext = $section->appendChild($xml->createElement('context'));
-                $optionsContext->setAttribute('name', $optionsContextName);
-                $this->appendOptionExtensions($xml, $optionsContext, $options);
+                $optionsContext->setAttribute('name', $this->optionsContextName($ivr));
+                $this->appendOptionExtensions($xml, $optionsContext, $section, $options);
             }
         } elseif ($service?->target) {
             $action = $condition->appendChild($xml->createElement('action'));
@@ -187,7 +138,7 @@ class FreeSwitchDialplanController extends Controller
         }
 
         $options = $ivr->options()->where('enabled', true)->where('digit', $digit)->orderBy('sort_order')->get();
-        $this->appendOptionExtensions($xml, $context, $options);
+        $this->appendOptionExtensions($xml, $context, $section, $options);
 
         return response($xml->saveXML(), 200, ['Content-Type' => 'text/xml; charset=UTF-8']);
     }
@@ -197,8 +148,98 @@ class FreeSwitchDialplanController extends Controller
         return 'ivr-options-'.preg_replace('/[^A-Za-z0-9_-]/', '', (string) $ivr->public_id);
     }
 
+    /**
+     * Plays an IVR's welcome prompt and, if it has enabled options, reads one
+     * digit and transfers to its options context. Used both for the initial
+     * inbound call and for a `submenu` option nested inside another IVR -
+     * the two cases are otherwise identical.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\OrganizationIvrOption>|null the
+     *   IVR's enabled options, for the caller to (optionally) embed as a
+     *   bonus inline context - or null if it has none.
+     */
+    private function appendMenuActions(\DOMDocument $xml, \DOMElement $condition, OrganizationIvr $ivr): ?\Illuminate\Support\Collection
+    {
+        // Give the caller a short moment before speech starts; this avoids
+        // clipping the first syllables on SIP/WebRTC endpoints that are
+        // still opening their audio element.
+        $pause = $condition->appendChild($xml->createElement('action'));
+        $pause->setAttribute('application', 'sleep');
+        $pause->setAttribute('data', '1500');
+
+        $generatedPrompt = $ivr->welcome_audio_path
+            && str_ends_with($ivr->welcome_audio_path, '/'.$ivr->public_id.'.wav');
+        if ($ivr->welcome_audio_path) {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'playback');
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($ivr->welcome_audio_path, '/')
+                : storage_path('app/public/'.$ivr->welcome_audio_path);
+            $action->setAttribute('data', $audioPath);
+        } elseif ($ivr->welcome_text) {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'speak');
+            // FreeSWITCH's speak application expects the TTS engine first,
+            // followed by the voice and text.  `en|...` is not an engine
+            // and causes the channel to fail before the caller hears the
+            // prompt when mod_flite is the installed provider.
+            $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $ivr->welcome_text));
+        }
+
+        $options = $ivr->options()->where('enabled', true)->orderBy('sort_order')->get();
+        if ($options->isEmpty()) {
+            return null;
+        }
+
+        if (! $generatedPrompt) {
+            $menuText = ' Please choose an option. ' . $options
+                ->map(fn ($option): string => 'Press '.$option->digit.' for '.$option->label.'.')
+                ->implode(' ');
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'speak');
+            $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $menuText));
+        }
+
+        // Read the digit once. The previous implementation appended a
+        // read/execute pair for every option, which immediately
+        // executed option 1 and then option 2 and ended the call.
+        $action = $condition->appendChild($xml->createElement('action'));
+        $action->setAttribute('application', 'read');
+        // read syntax: min, max, prompt, variable, timeout(ms),
+        // terminator. The previous order made FreeSWITCH interpret
+        // the timeout ("5") as a sound filename (5.wav).
+        $action->setAttribute('data', '1 1 silence_stream://1000 ivr_digit '.max(10000, ((int) $ivr->timeout_seconds * 1000)).' #');
+        $action = $condition->appendChild($xml->createElement('action'));
+        $action->setAttribute('application', 'transfer');
+        $action->setAttribute('data', '${ivr_digit} XML '.$this->optionsContextName($ivr));
+
+        return $options;
+    }
+
+    private function appendDirectivePlayback(\DOMDocument $xml, \DOMElement $condition, OrganizationIvrOption $option): void
+    {
+        if ($option->directive_audio_path) {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'playback');
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($option->directive_audio_path, '/')
+                : storage_path('app/public/'.$option->directive_audio_path);
+            $action->setAttribute('data', $audioPath);
+
+            return;
+        }
+
+        if ($option->directive_text) {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'speak');
+            $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', (string) $option->directive_text));
+        }
+    }
+
     /** @param \Illuminate\Support\Collection<int, \App\Models\OrganizationIvrOption> $options */
-    private function appendOptionExtensions(\DOMDocument $xml, \DOMElement $context, $options): void
+    private function appendOptionExtensions(\DOMDocument $xml, \DOMElement $context, \DOMElement $section, $options): void
     {
         // Create an exact route for each key press in the IVR's own
         // context. This prevents one option from matching every digit.
@@ -210,6 +251,38 @@ class FreeSwitchDialplanController extends Controller
             $digitCondition->setAttribute('expression', '^'.preg_quote((string) $option->digit, '/').'$');
             $type = (string) $option->destination_type;
             $destination = (string) ($option->destination ?? '');
+
+            if ($type === 'submenu') {
+                // The child IVR's own options context (e.g.
+                // ivr-options-<child_public_id>) is served the normal way,
+                // by FreeSWITCH re-fetching this same endpoint once the
+                // caller presses a digit - so it does not need to be (and
+                // deliberately is not) embedded here. That also means a
+                // submenu that loops back to an ancestor menu can never
+                // cause runaway recursion while building this XML document;
+                // it just becomes a caller-navigable loop, same as any real
+                // "press 9 to go back" IVR.
+                $child = OrganizationIvr::query()->where('public_id', $destination)->where('enabled', true)->first();
+                if ($child) {
+                    $this->appendMenuActions($xml, $digitCondition, $child);
+                } else {
+                    $action = $digitCondition->appendChild($xml->createElement('action'));
+                    $action->setAttribute('application', 'hangup');
+                    $action->setAttribute('data', 'NORMAL_CLEARING');
+                }
+
+                continue;
+            }
+
+            if ($type === 'directive') {
+                $this->appendDirectivePlayback($xml, $digitCondition, $option);
+                $hangup = $digitCondition->appendChild($xml->createElement('action'));
+                $hangup->setAttribute('application', 'hangup');
+                $hangup->setAttribute('data', 'NORMAL_CLEARING');
+
+                continue;
+            }
+
             $action = $digitCondition->appendChild($xml->createElement('action'));
             if ($type === 'hangup') {
                 $action->setAttribute('application', 'hangup');

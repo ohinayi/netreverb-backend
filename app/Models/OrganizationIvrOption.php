@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['organization_ivr_id', 'digit', 'label', 'destination_type', 'destination', 'sort_order', 'enabled'])]
+#[Fillable(['organization_ivr_id', 'digit', 'label', 'destination_type', 'destination', 'directive_text', 'directive_audio_path', 'sort_order', 'enabled'])]
 class OrganizationIvrOption extends Model
 {
     protected $table = 'organization_ivr_options';
