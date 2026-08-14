@@ -37,11 +37,15 @@ class LocalConferenceRecordingStorage implements ConferenceRecordingStorage
 
     public function delete(ConferenceRecording $recording): void
     {
-        if ($recording->file_path === null || $recording->file_path === '') {
-            return;
+        $disk = Storage::disk(config('telephony.recordings.disk'));
+
+        if ($recording->file_path !== null && $recording->file_path !== '') {
+            $disk->delete($recording->file_path);
         }
 
-        Storage::disk(config('telephony.recordings.disk'))->delete($recording->file_path);
+        if ($recording->transcript_file_path !== null && $recording->transcript_file_path !== '') {
+            $disk->delete($recording->transcript_file_path);
+        }
     }
 
     public function exists(ConferenceRecording $recording): bool

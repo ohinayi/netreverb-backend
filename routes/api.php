@@ -410,6 +410,10 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/recordings/{conferenceRecording}',
                     [ConferenceRecordingController::class, 'destroy'],
                 )->name('organizations.conference-rooms.recordings.destroy');
+                Route::get(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/recordings/{conferenceRecording}/transcript',
+                    [ConferenceRecordingController::class, 'transcript'],
+                )->name('organizations.conference-rooms.recordings.transcript');
                 Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/recording/start',
                     [ConferenceRecordingController::class, 'start'],

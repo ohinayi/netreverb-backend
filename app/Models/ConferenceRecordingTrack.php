@@ -3,9 +3,11 @@
 namespace App\Models;
 
 use App\Enums\ConferenceRecordingTrackStatus;
+use App\Enums\ConferenceTranscriptStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'conference_recording_id',
@@ -14,6 +16,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'kind',
     'storage_key',
     'status',
+    'transcript_status',
+    'transcript_error',
+    'transcript_started_at',
+    'transcript_completed_at',
     'duration',
     'size',
 ])]
@@ -26,6 +32,11 @@ class ConferenceRecordingTrack extends Model
     public function conferenceRecording(): BelongsTo
     {
         return $this->belongsTo(ConferenceRecording::class);
+    }
+
+    public function transcriptSegments(): HasMany
+    {
+        return $this->hasMany(ConferenceRecordingTranscriptSegment::class, 'conference_recording_track_id');
     }
 
     /**
@@ -49,8 +60,11 @@ class ConferenceRecordingTrack extends Model
     {
         return [
             'status' => ConferenceRecordingTrackStatus::class,
+            'transcript_status' => ConferenceTranscriptStatus::class,
             'duration' => 'integer',
             'size' => 'integer',
+            'transcript_started_at' => 'datetime',
+            'transcript_completed_at' => 'datetime',
         ];
     }
 }

@@ -6,6 +6,7 @@ use Agence104\LiveKit\EgressServiceClient;
 use Agence104\LiveKit\RoomServiceClient;
 use App\Enums\ConferenceRecordingStatus;
 use App\Enums\ConferenceRecordingTrackStatus;
+use App\Enums\ConferenceTranscriptStatus;
 use App\Models\ConferenceRecording;
 use App\Models\ConferenceRecordingTrack;
 use App\Models\ConferenceRoom;
@@ -48,7 +49,7 @@ class LiveKitConferenceRecordingManager
         TrackSource::SCREEN_SHARE => ['kind' => 'screen_share', 'extension' => 'webm'],
         TrackSource::SCREEN_SHARE_AUDIO => ['kind' => 'screen_share_audio', 'extension' => 'ogg'],
     ];
-    public function start(ConferenceRoom $room): ConferenceRecording
+    public function start(ConferenceRoom $room, bool $transcriptionEnabled = false): ConferenceRecording
     {
         $recording = DB::transaction(function () use ($room): ConferenceRecording {
             $active = $room->recordings()
@@ -71,6 +72,8 @@ class LiveKitConferenceRecordingManager
                 'file_path' => $key,
                 'file_name' => basename($key),
                 'storage_key' => $key,
+                'transcription_enabled' => $transcriptionEnabled,
+                'transcript_status' => $transcriptionEnabled ? ConferenceTranscriptStatus::Pending : null,
                 'status' => ConferenceRecordingStatus::Starting,
             ]);
         });
@@ -197,6 +200,9 @@ class LiveKitConferenceRecordingManager
                 'kind' => $kind,
                 'storage_key' => $storageKey,
                 'status' => ConferenceRecordingTrackStatus::Recording,
+                'transcript_status' => $recording->transcription_enabled && in_array($kind, ['microphone', 'screen_share_audio'], true)
+                    ? ConferenceTranscriptStatus::Pending
+                    : null,
             ]);
 
             return true;

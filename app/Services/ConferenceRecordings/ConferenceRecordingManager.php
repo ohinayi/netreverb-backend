@@ -162,6 +162,10 @@ class ConferenceRecordingManager
     {
         $disk = Storage::disk('livekit_recordings');
 
+        if ($recording->transcript_file_path) {
+            $disk->delete($recording->transcript_file_path);
+        }
+
         if ($recording->storage_key) {
             $disk->delete($recording->storage_key);
         }
