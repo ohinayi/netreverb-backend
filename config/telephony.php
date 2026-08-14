@@ -52,6 +52,13 @@ return [
             'user' => env('FREESWITCH_CALL_RECORDINGS_SYNC_USER', 'deploy'),
             'password' => env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD'),
             'remote_base' => env('FREESWITCH_CALL_RECORDINGS_SYNC_REMOTE_BASE', '/usr/local/freeswitch/var/lib/freeswitch/recordings/calls'),
+            // rsync never deletes its source, so every synced recording
+            // otherwise sits on the VPS disk twice forever - once in
+            // FreeSWITCH's own recordings folder, once in the app's synced
+            // copy. Deletion only ever targets a file already confirmed
+            // synced and at least 10 minutes old (see
+            // SyncCallRecordingFromVps::deleteSyncedRemoteSource()).
+            'remove_source_after_sync' => env('FREESWITCH_CALL_RECORDINGS_REMOVE_SOURCE_AFTER_SYNC', true),
         ],
         'direct_video_mux' => [
             'ffmpeg_binary' => env('FREESWITCH_CALL_RECORDINGS_DIRECT_VIDEO_MUX_FFMPEG_BINARY', 'ffmpeg'),

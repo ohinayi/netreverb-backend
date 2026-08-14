@@ -91,7 +91,37 @@ class SyncCallRecordingFromVps implements ShouldQueue
             ])->save();
         }
 
+        $this->deleteSyncedRemoteSource($synchronizer, $pathToSync);
+
         ProcessAiAssistantCallRecording::dispatch($callLog->id)->afterCommit();
+    }
+
+    /**
+     * rsync never removes its source - without this, every synced recording
+     * sits on the VPS disk twice (once in FreeSWITCH's own recordings
+     * folder, once in this synced copy) forever. Safe to run here: this
+     * only ever fires after the recording has already been confirmed
+     * stopped by FreeSWITCH and successfully synced locally above, and the
+     * remote deletion itself additionally requires the source file to be
+     * at least 10 minutes old before it will touch it.
+     */
+    private function deleteSyncedRemoteSource(CallRecordingVpsSynchronizer $synchronizer, string $syncedRelativePath): void
+    {
+        if (! (bool) config('telephony.call_recordings.sync.remove_source_after_sync', true)) {
+            return;
+        }
+
+        $remoteBase = rtrim((string) config('telephony.call_recordings.sync.remote_base'), '/');
+        $remoteFilePath = $remoteBase.'/'.ltrim($syncedRelativePath, '/');
+
+        $synchronizer->deleteRemoteFileIfStale(
+            host: (string) config('telephony.call_recordings.sync.host'),
+            user: (string) config('telephony.call_recordings.sync.user'),
+            remoteFilePath: $remoteFilePath,
+            password: config('telephony.call_recordings.sync.password'),
+            minAgeMinutes: 10,
+            output: new NullOutput,
+        );
     }
 
     public function failed(?Throwable $exception): void

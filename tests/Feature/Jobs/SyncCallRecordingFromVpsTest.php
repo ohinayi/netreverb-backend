@@ -64,6 +64,24 @@ class SyncCallRecordingFromVpsTest extends TestCase
                             'local_path' => storage_path('app/public/recordings/calls/2026/07/08/'),
                         ];
                     });
+
+                $mock->shouldReceive('deleteRemoteFileIfStale')
+                    ->once()
+                    ->withArgs(function (
+                        string $host,
+                        string $user,
+                        string $remoteFilePath,
+                        ?string $password,
+                        int $minAgeMinutes,
+                        $output,
+                    ): bool {
+                        return $host === 'sip.classyra.com.ng'
+                            && $user === 'deploy'
+                            && $remoteFilePath === '/usr/local/freeswitch/var/lib/freeswitch/recordings/calls/2026/07/08/test.wav'
+                            && $password === 'secret'
+                            && $minAgeMinutes === 10
+                            && $output instanceof NullOutput;
+                    });
             }),
         );
 
