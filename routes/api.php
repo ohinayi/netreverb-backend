@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SmsWalletController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
+use App\Http\Controllers\Api\V1\SuperAdminPackagesController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
 use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
@@ -113,6 +114,10 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 'super-admin/sms/purchases/{smsCreditPurchase}/complete',
                 [SuperAdminSmsController::class, 'completePurchase'],
             )->name('super-admin.sms.purchases.complete');
+            Route::get('super-admin/packages', [SuperAdminPackagesController::class, 'index'])
+                ->name('super-admin.packages.index');
+            Route::post('super-admin/packages/voices/{voice}/download', [SuperAdminPackagesController::class, 'downloadVoice'])
+                ->name('super-admin.packages.voices.download');
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');
