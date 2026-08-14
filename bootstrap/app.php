@@ -21,6 +21,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
         $middleware->appendToGroup('api', ApiSecurityHeaders::class);
+        // This is an API-only backend - there is no named 'login' route for
+        // an unauthenticated request to redirect to. Without this, a plain
+        // browser navigation (Accept header doesn't ask for JSON, so
+        // Authenticate::redirectTo() doesn't take the JSON short-circuit)
+        // hitting a protected endpoint crashed with
+        // "Route [login] not defined." instead of a clean 401.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
