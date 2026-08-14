@@ -8,7 +8,9 @@ use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Services\Telephony\PiperTtsService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -22,6 +24,7 @@ class OrganizationIvrController extends Controller
         $ivrs = $organization->ivrs()->with('options')->latest()->get();
         $serviceNumberByIvrId = $this->serviceNumberByIvrPublicId($organization);
         $ivrs->each(fn (OrganizationIvr $ivr) => $ivr->setAttribute('service_number_id', $serviceNumberByIvrId->get($ivr->public_id)));
+
         return response()->json(['data' => $ivrs]);
     }
 
@@ -31,9 +34,9 @@ class OrganizationIvrController extends Controller
      * pointing the other way, so this is the only way to tell the builder
      * UI which number (if any) is already attached to a given menu.
      *
-     * @return \Illuminate\Support\Collection<string, string> ivr public_id => service number public_id
+     * @return Collection<string, string> ivr public_id => service number public_id
      */
-    private function serviceNumberByIvrPublicId(Organization $organization): \Illuminate\Support\Collection
+    private function serviceNumberByIvrPublicId(Organization $organization): Collection
     {
         return $organization->serviceNumbers()->get(['public_id', 'configuration'])
             ->filter(fn ($service) => ! empty($service->configuration['ivr_public_id'] ?? null))
@@ -50,6 +53,7 @@ class OrganizationIvrController extends Controller
         $options = $this->normalizeOptions($request->input('options', []), $organization, 0);
         $ivr = $this->persistTree($organization, $data, $options, null);
         $this->attachServiceNumber($organization, $ivr, $data);
+
         return response()->json(['data' => $ivr->load('options')], 201);
     }
 
@@ -59,7 +63,9 @@ class OrganizationIvrController extends Controller
         abort_unless((int) $ivr->organization_id === (int) $organization->getKey(), 404);
         $data = $this->validated($request, $organization);
         if ($request->hasFile('welcome_audio')) {
-            if ($ivr->welcome_audio_path) Storage::disk('public')->delete($ivr->welcome_audio_path);
+            if ($ivr->welcome_audio_path) {
+                Storage::disk('public')->delete($ivr->welcome_audio_path);
+            }
             $data['welcome_audio_path'] = $request->file('welcome_audio')->store('ivr-welcome/'.$organization->public_id, 'public');
         }
         if ($request->has('options')) {
@@ -69,6 +75,7 @@ class OrganizationIvrController extends Controller
             $ivr->update(collect($data)->except('service_number_id')->all());
         }
         $this->attachServiceNumber($organization, $ivr, $data);
+
         return response()->json(['data' => $ivr->fresh('options')]);
     }
 
@@ -81,7 +88,9 @@ class OrganizationIvrController extends Controller
      */
     private function attachServiceNumber(Organization $organization, OrganizationIvr $ivr, array $data): void
     {
-        if (empty($data['service_number_id'])) return;
+        if (empty($data['service_number_id'])) {
+            return;
+        }
         $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
         $configuration = $service->configuration ?? [];
         $configuration['ivr_public_id'] = $ivr->public_id;
@@ -93,6 +102,7 @@ class OrganizationIvrController extends Controller
         $this->authorizeOrganization($organization, true);
         abort_unless((int) $ivr->organization_id === (int) $organization->getKey(), 404);
         $ivr->delete();
+
         return response()->noContent();
     }
 
@@ -101,6 +111,7 @@ class OrganizationIvrController extends Controller
         $this->authorizeOrganization($organization);
         abort_unless((int) $ivr->organization_id === (int) $organization->getKey(), 404);
         $ivr->setAttribute('service_number_id', $this->serviceNumberByIvrPublicId($organization)->get($ivr->public_id));
+
         return response()->json(['data' => $ivr->load('options')]);
     }
 
@@ -121,6 +132,18 @@ class OrganizationIvrController extends Controller
                 throw ValidationException::withMessages(['service_number_id' => 'Select an active service number assigned to this organization.']);
             }
         }
+        foreach ($data['options'] ?? [] as $index => $option) {
+            if ($option['destination_type'] === 'submenu') {
+                $exists = $organization->ivrs()->where('public_id', $option['destination'] ?? null)->exists();
+                if (! $exists) {
+                    throw ValidationException::withMessages(["options.{$index}.destination" => 'Select an existing IVR menu in this organization to nest as a submenu.']);
+                }
+            }
+            if ($option['destination_type'] === 'directive' && ! trim($option['directive_text'] ?? '')) {
+                throw ValidationException::withMessages(["options.{$index}.directive_text" => 'Enter the message to play for this directive.']);
+            }
+        }
+
         return $data;
     }
 
@@ -138,7 +161,9 @@ class OrganizationIvrController extends Controller
      */
     private function normalizeOptions(mixed $rawOptions, Organization $organization, int $depth, ?string $ownIvrPublicId = null): array
     {
-        if (! is_array($rawOptions)) $rawOptions = [];
+        if (! is_array($rawOptions)) {
+            $rawOptions = [];
+        }
         if (count($rawOptions) > 10) {
             throw ValidationException::withMessages(['options' => 'A menu can have at most 10 options.']);
         }
@@ -281,7 +306,9 @@ class OrganizationIvrController extends Controller
         abort_if($organization->isPersonalWorkspace(), 404);
         $membership = request()->user()?->organizations()->whereKey($organization->getKey())->first();
         abort_unless($membership, 403);
-        if ($manage) abort_unless(in_array($membership->pivot->role ?? null, ['owner', 'admin'], true), 403);
+        if ($manage) {
+            abort_unless(in_array($membership->pivot->role ?? null, ['owner', 'admin'], true), 403);
+        }
     }
 
     public function preview(Request $request, Organization $organization)
@@ -294,7 +321,7 @@ class OrganizationIvrController extends Controller
         ]);
         // Previews live in their own throwaway path so they never collide
         // with, or get mistaken for, an IVR's saved generated prompt.
-        $relativePath = 'ivr-preview/'.$organization->public_id.'/'.(string) \Illuminate\Support\Str::uuid().'.wav';
+        $relativePath = 'ivr-preview/'.$organization->public_id.'/'.(string) Str::uuid().'.wav';
         $generated = app(PiperTtsService::class)->generate(
             $data['welcome_text'],
             $relativePath,
@@ -302,6 +329,7 @@ class OrganizationIvrController extends Controller
             isset($data['tts_speed']) ? (float) $data['tts_speed'] : null,
         );
         abort_unless($generated, 422, 'Preview audio could not be generated. Check the Piper voice configuration.');
+
         return response()->json(['data' => ['url' => Storage::disk('public')->url($generated)]]);
     }
 }
