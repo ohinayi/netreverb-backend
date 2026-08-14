@@ -9,6 +9,7 @@ use App\Models\SipProvisioningState;
 use App\Models\User;
 use App\Services\Messaging\OutboundMessagingReadiness;
 use App\Services\Payments\PaymentGatewayService;
+use App\Services\SystemMonitoring\SystemResourceSnapshot;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,7 @@ class SuperAdminAnalyticsController extends Controller
     public function __construct(
         private readonly OutboundMessagingReadiness $messagingReadiness,
         private readonly PaymentGatewayService $payments,
+        private readonly SystemResourceSnapshot $systemResources,
     ) {}
 
     /**
@@ -58,6 +60,7 @@ class SuperAdminAnalyticsController extends Controller
             ->withCount(['memberships as users_count', 'extensions'])
             ->withSum(['callLogs as call_seconds' => fn ($query) => $query->whereBetween('started_at', [$from, $to])], 'duration')
             ->withCount(['callLogs as calls_count' => fn ($query) => $query->whereBetween('started_at', [$from, $to])])
+            ->withSum(['callLogs as recording_bytes' => fn ($query) => $query->where('recording_status', 'completed')], 'recording_size')
             ->orderByDesc('calls_count')
             ->limit(10)
             ->get()
@@ -69,6 +72,7 @@ class SuperAdminAnalyticsController extends Controller
                 'extensions_count' => (int) $organization->extensions_count,
                 'calls_count' => (int) $organization->calls_count,
                 'call_seconds' => (int) ($organization->call_seconds ?? 0),
+                'recording_bytes' => (int) ($organization->recording_bytes ?? 0),
             ]);
 
         return response()->json([
@@ -104,6 +108,7 @@ class SuperAdminAnalyticsController extends Controller
                         'gateways' => $this->payments->readiness(),
                     ],
                 ],
+                'system' => $this->systemResources->capture(),
             ],
         ]);
     }

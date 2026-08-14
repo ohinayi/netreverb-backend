@@ -52,7 +52,12 @@ class SuperAdminAnalyticsTest extends TestCase
             ->assertJsonPath('data.health.recordings.failed', 1)
             ->assertJsonPath('data.health.outbound_messaging.enabled', false)
             ->assertJsonPath('data.health.payments.enabled', false)
-            ->assertJsonMissingPath('data.health.payments.gateways.paystack.secret_key');
+            ->assertJsonMissingPath('data.health.payments.gateways.paystack.secret_key')
+            ->assertJsonStructure([
+                'data' => [
+                    'system' => ['hostname', 'captured_at', 'cpu', 'memory', 'disk', 'recording_storage'],
+                ],
+            ]);
     }
 
     public function test_regular_user_cannot_view_platform_health(): void
