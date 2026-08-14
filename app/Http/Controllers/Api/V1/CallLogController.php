@@ -191,6 +191,12 @@ class CallLogController extends Controller
 
         $data = $this->stripDuplicateFreeSwitchUuid($data);
 
+        // The client never sends this - every call log has been created with
+        // a null started_at, which starved anything bucketing calls by date
+        // (super-admin activity chart, per-organization usage) of any data
+        // at all despite calls completing normally with real durations.
+        $data['started_at'] ??= now();
+
         $callLog = $organization->callLogs()->create($data);
         $this->prepareRecordingInfrastructure($callLog);
 
