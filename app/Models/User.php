@@ -27,6 +27,7 @@ use Laravel\Sanctum\HasApiTokens;
     'locale',
     'terms_accepted_at',
     'last_login_at',
+    'email_verified_at'
 ])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements MustVerifyEmailContract

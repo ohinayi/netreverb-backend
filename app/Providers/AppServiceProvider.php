@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Contracts\Ai\AudioTranscriptionProvider;
+use App\Contracts\Ai\TimestampedAudioTranscriptionProvider;
 use App\Contracts\Ai\StructuredAssistantProvider;
 use App\Contracts\Messaging\OutboundMessageProvider;
 use App\Contracts\Recordings\CallRecordingStorage;
@@ -18,6 +19,7 @@ use App\Observers\CallLogObserver;
 use App\Observers\UserObserver;
 use App\Services\Ai\GeminiStructuredAssistantProvider;
 use App\Services\Ai\WhisperCppTranscriptionProvider;
+use App\Services\Ai\WhisperCppTimestampedAudioTranscriptionProvider;
 use App\Services\Messaging\DisabledOutboundMessageProvider;
 use App\Services\Messaging\EBulkSmsOutboundMessageProvider;
 use App\Services\Recordings\LocalCallRecordingStorage;
@@ -46,6 +48,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(AudioTranscriptionProvider::class, WhisperCppTranscriptionProvider::class);
+        $this->app->bind(TimestampedAudioTranscriptionProvider::class, WhisperCppTimestampedAudioTranscriptionProvider::class);
         $this->app->bind(StructuredAssistantProvider::class, GeminiStructuredAssistantProvider::class);
         $this->app->bind(
             OutboundMessageProvider::class,
