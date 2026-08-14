@@ -26,6 +26,7 @@ class OrganizationResource extends JsonResource
             'timezone' => $this->timezone,
             'locale' => $this->locale,
             'settings' => $this->settings,
+            'pricing_group_id' => $this->pricingGroup?->public_id,
             'operational_policy' => $this->operationalPolicy(),
             'members_count' => $this->whenCounted('memberships'),
             'departments_count' => $this->whenCounted('departments'),

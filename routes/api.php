@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SmsWalletController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\SuperAdminPackagesController;
+use App\Http\Controllers\Api\V1\SuperAdminPricingGroupsController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
 use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
@@ -118,6 +119,16 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('super-admin.packages.index');
             Route::post('super-admin/packages/voices/{voice}/download', [SuperAdminPackagesController::class, 'downloadVoice'])
                 ->name('super-admin.packages.voices.download');
+            Route::get('super-admin/pricing-groups', [SuperAdminPricingGroupsController::class, 'index'])
+                ->name('super-admin.pricing-groups.index');
+            Route::post('super-admin/pricing-groups', [SuperAdminPricingGroupsController::class, 'store'])
+                ->name('super-admin.pricing-groups.store');
+            Route::patch('super-admin/pricing-groups/{pricingGroup}', [SuperAdminPricingGroupsController::class, 'update'])
+                ->name('super-admin.pricing-groups.update');
+            Route::delete('super-admin/pricing-groups/{pricingGroup}', [SuperAdminPricingGroupsController::class, 'destroy'])
+                ->name('super-admin.pricing-groups.destroy');
+            Route::patch('super-admin/organizations/{organization}/pricing-group', [SuperAdminPricingGroupsController::class, 'assignOrganization'])
+                ->name('super-admin.organizations.pricing-group.assign');
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');

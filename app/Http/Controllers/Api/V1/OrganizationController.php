@@ -44,6 +44,7 @@ class OrganizationController extends Controller
             ->with([
                 'memberships' => fn ($query) => $query->whereBelongsTo($request->user()),
                 'workspaces' => fn ($query) => $query->where('status', 'active')->withCount(['memberships', 'departments']),
+                'pricingGroup:id,public_id',
             ])
             ->withCount($this->operationalCounts())
             ->latest()
