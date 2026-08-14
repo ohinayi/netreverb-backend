@@ -129,6 +129,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('super-admin.pricing-groups.destroy');
             Route::patch('super-admin/organizations/{organization}/pricing-group', [SuperAdminPricingGroupsController::class, 'assignOrganization'])
                 ->name('super-admin.organizations.pricing-group.assign');
+            Route::patch('super-admin/organizations/{organization}/billing', [SuperAdminPricingGroupsController::class, 'updateBilling'])
+                ->name('super-admin.organizations.billing.update');
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');

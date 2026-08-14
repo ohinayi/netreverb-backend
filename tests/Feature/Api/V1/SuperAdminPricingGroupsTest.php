@@ -20,12 +20,14 @@ class SuperAdminPricingGroupsTest extends TestCase
         $created = $this->postJson('/api/v1/super-admin/pricing-groups', [
             'name' => 'Growth',
             'slug' => 'growth',
+            'applies_to' => 'organization',
             'price_minor' => 4900,
             'currency' => 'USD',
             'billing_interval' => 'monthly',
             'features' => ['sip_calling', 'conference_rooms'],
         ])->assertCreated()
             ->assertJsonPath('data.name', 'Growth')
+            ->assertJsonPath('data.applies_to', 'organization')
             ->assertJsonPath('data.features', ['sip_calling', 'conference_rooms']);
 
         $publicId = $created->json('data.public_id');
@@ -39,6 +41,7 @@ class SuperAdminPricingGroupsTest extends TestCase
         $this->patchJson("/api/v1/super-admin/pricing-groups/{$publicId}", [
             'name' => 'Growth',
             'slug' => 'growth',
+            'applies_to' => 'organization',
             'price_minor' => 5900,
             'currency' => 'USD',
             'billing_interval' => 'monthly',
@@ -83,5 +86,54 @@ class SuperAdminPricingGroupsTest extends TestCase
 
         $this->getJson('/api/v1/super-admin/pricing-groups')->assertForbidden();
         $this->postJson('/api/v1/super-admin/pricing-groups', [])->assertForbidden();
+    }
+
+    public function test_organization_keeps_full_access_until_billing_is_activated(): void
+    {
+        $organization = Organization::factory()->create();
+
+        $this->assertTrue($organization->hasFeature('call_recording'));
+        $this->assertNotEmpty($organization->availableFeatures());
+    }
+
+    public function test_activating_billing_without_confirmed_payment_hides_every_feature(): void
+    {
+        $organization = Organization::factory()->create(['payment_required' => true]);
+
+        $this->assertFalse($organization->hasFeature('call_recording'));
+        $this->assertSame([], $organization->availableFeatures());
+    }
+
+    public function test_confirmed_payment_grants_only_the_assigned_plans_features(): void
+    {
+        $group = PricingGroup::factory()->create(['features' => ['call_recording']]);
+        $organization = Organization::factory()->create([
+            'pricing_group_id' => $group->id,
+            'payment_required' => true,
+            'payment_confirmed' => true,
+        ]);
+
+        $this->assertTrue($organization->hasFeature('call_recording'));
+        $this->assertFalse($organization->hasFeature('conference_rooms'));
+        $this->assertSame(['call_recording'], $organization->availableFeatures());
+    }
+
+    public function test_super_admin_can_activate_and_confirm_billing_for_an_organization(): void
+    {
+        Sanctum::actingAs(User::factory()->create(['is_super_admin' => true]));
+
+        $organization = Organization::factory()->create();
+
+        $this->patchJson("/api/v1/super-admin/organizations/{$organization->public_id}/billing", [
+            'payment_required' => true,
+            'payment_confirmed' => false,
+        ])->assertOk()
+            ->assertJsonPath('data.payment_required', true)
+            ->assertJsonPath('data.payment_confirmed', false);
+
+        $this->patchJson("/api/v1/super-admin/organizations/{$organization->public_id}/billing", [
+            'payment_required' => true,
+            'payment_confirmed' => true,
+        ])->assertOk()->assertJsonPath('data.payment_confirmed', true);
     }
 }

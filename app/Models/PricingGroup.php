@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'name', 'slug', 'description', 'price_minor', 'currency',
+    'name', 'slug', 'description', 'applies_to', 'price_minor', 'currency',
     'billing_interval', 'features', 'is_active',
 ])]
 class PricingGroup extends Model
@@ -18,6 +18,7 @@ class PricingGroup extends Model
     use HasFactory, HasUlids, SoftDeletes;
 
     protected $attributes = [
+        'applies_to' => 'organization',
         'price_minor' => 0,
         'currency' => 'USD',
         'billing_interval' => 'monthly',

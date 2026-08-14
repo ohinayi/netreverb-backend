@@ -6,6 +6,7 @@ use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\ExtensionProvisioningMode;
 use App\Enums\MembershipStatus;
 use App\Enums\OrganizationStatus;
+use App\Support\FeatureCatalog;
 use Database\Factories\OrganizationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'locale',
     'settings',
     'pricing_group_id',
+    'payment_required',
+    'payment_confirmed',
 ])]
 class Organization extends Model
 {
@@ -145,6 +148,46 @@ class Organization extends Model
     public function pricingGroup(): BelongsTo
     {
         return $this->belongsTo(PricingGroup::class);
+    }
+
+    /**
+     * True by default for every organization - nothing is paywalled until an
+     * admin explicitly activates billing for this specific org
+     * (payment_required). Once active, a feature is only available once
+     * payment has also been confirmed and the assigned plan actually
+     * includes it.
+     */
+    public function hasFeature(string $key): bool
+    {
+        if (! $this->payment_required) {
+            return true;
+        }
+
+        if (! $this->payment_confirmed) {
+            return false;
+        }
+
+        return $this->pricingGroup?->hasFeature($key) ?? false;
+    }
+
+    /**
+     * The full catalog when access isn't gated, or only what the confirmed
+     * plan actually includes otherwise - lets the frontend hide UI for a
+     * feature without needing to know the gating rules itself.
+     *
+     * @return list<string>
+     */
+    public function availableFeatures(): array
+    {
+        if (! $this->payment_required) {
+            return FeatureCatalog::keys();
+        }
+
+        if (! $this->payment_confirmed) {
+            return [];
+        }
+
+        return $this->pricingGroup?->features ?? [];
     }
 
     /**
@@ -276,6 +319,8 @@ class Organization extends Model
             'status' => OrganizationStatus::class,
             'extension_provisioning_mode' => ExtensionProvisioningMode::class,
             'settings' => 'array',
+            'payment_required' => 'boolean',
+            'payment_confirmed' => 'boolean',
         ];
     }
 }

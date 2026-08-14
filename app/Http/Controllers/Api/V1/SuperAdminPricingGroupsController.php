@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\PricingGroup;
+use App\Support\FeatureCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -12,21 +13,6 @@ use Illuminate\Validation\ValidationException;
 
 class SuperAdminPricingGroupsController extends Controller
 {
-    /**
-     * The fixed set of modules a pricing group can gate. Kept here rather
-     * than free-text so the admin UI can offer a checklist instead of
-     * inventing feature keys that nothing in the app actually checks.
-     */
-    private const FEATURE_CATALOG = [
-        'sip_calling' => 'SIP & WebRTC calling',
-        'conference_rooms' => 'Conference rooms',
-        'call_recording' => 'Call recording',
-        'ai_assistants' => 'AI voice agents',
-        'translation' => 'Real-time translation',
-        'outbound_messaging' => 'Outbound messaging & campaigns',
-        'sms_wallet' => 'SMS credits',
-    ];
-
     public function index(Request $request): JsonResponse
     {
         abort_unless($request->user()?->isSuperAdmin(), 403);
@@ -38,7 +24,7 @@ class SuperAdminPricingGroupsController extends Controller
 
         return response()->json([
             'data' => $groups,
-            'feature_catalog' => self::FEATURE_CATALOG,
+            'feature_catalog' => FeatureCatalog::MODULES,
         ]);
     }
 
@@ -110,12 +96,35 @@ class SuperAdminPricingGroupsController extends Controller
                 Rule::unique('pricing_groups', 'slug')->ignore($existing?->id),
             ],
             'description' => ['nullable', 'string', 'max:255'],
+            'applies_to' => ['required', Rule::in(['individual', 'organization'])],
             'price_minor' => ['required', 'integer', 'min:0'],
             'currency' => ['required', 'string', 'size:3'],
             'billing_interval' => ['required', Rule::in(['monthly', 'annual'])],
             'features' => ['array'],
-            'features.*' => [Rule::in(array_keys(self::FEATURE_CATALOG))],
+            'features.*' => [Rule::in(FeatureCatalog::keys())],
             'is_active' => ['boolean'],
+        ]);
+    }
+
+    /**
+     * Toggle billing enforcement for one organization. Activating it without
+     * also confirming payment immediately hides every gated feature - only
+     * flip payment_required on once you're ready for that; confirm payment
+     * separately once it's actually been collected.
+     */
+    public function updateBilling(Request $request, Organization $organization): JsonResponse
+    {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+
+        $validated = $request->validate([
+            'payment_required' => ['required', 'boolean'],
+            'payment_confirmed' => ['required', 'boolean'],
+        ]);
+
+        $organization->update($validated);
+
+        return response()->json([
+            'data' => $organization->fresh()->load('pricingGroup'),
         ]);
     }
 }
