@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\RecordingResource;
+use App\Enums\CallRecordingStatus;
 use App\Models\CallLog;
 use App\Models\Organization;
 use App\Services\Authorization\CallLogVisibility;
@@ -38,6 +39,12 @@ class RecordingController extends Controller
         $recordings = $organization->callLogs()
             ->with(['callerExtension.dialableNumber', 'callerExtension.user', 'calleeExtension.dialableNumber', 'calleeExtension.user'])
             ->whereNotNull('recording_status')
+            // CallRecordingManager::delete() marks a user-deleted recording
+            // Orphaned rather than clearing the status outright (the same
+            // status a recording whose file was genuinely lost ends up
+            // with) - without this it kept showing up here looking exactly
+            // like the delete had silently failed.
+            ->where('recording_status', '!=', CallRecordingStatus::Orphaned->value)
             ->when(! $canViewAll, function ($query) use ($accessibleExtensionIds): void {
                 $query->where(function ($q) use ($accessibleExtensionIds): void {
                     $q->whereIn('caller_extension_id', $accessibleExtensionIds)
