@@ -56,14 +56,15 @@ class SuperAdminAnalyticsController extends Controller
             ];
         });
 
-        $organizationUsage = Organization::query()
+        $organizationUsagePage = Organization::query()
             ->withCount(['memberships as users_count', 'extensions'])
             ->withSum(['callLogs as call_seconds' => fn ($query) => $query->whereBetween('started_at', [$from, $to])], 'duration')
             ->withCount(['callLogs as calls_count' => fn ($query) => $query->whereBetween('started_at', [$from, $to])])
             ->withSum(['callLogs as recording_bytes' => fn ($query) => $query->where('recording_status', 'completed')], 'recording_size')
             ->orderByDesc('calls_count')
-            ->limit(10)
-            ->get()
+            ->paginate(10, ['*'], 'organizations_page');
+
+        $organizationUsage = $organizationUsagePage->getCollection()
             ->map(fn (Organization $organization): array => [
                 'id' => $organization->public_id,
                 'name' => $organization->name,
@@ -86,6 +87,11 @@ class SuperAdminAnalyticsController extends Controller
                 ],
                 'activity' => $activity->values(),
                 'organizations' => $organizationUsage->values(),
+                'organizations_meta' => [
+                    'current_page' => $organizationUsagePage->currentPage(),
+                    'last_page' => $organizationUsagePage->lastPage(),
+                    'total' => $organizationUsagePage->total(),
+                ],
                 'health' => [
                     'queue' => [
                         'pending_jobs' => (int) DB::table('jobs')->count(),
