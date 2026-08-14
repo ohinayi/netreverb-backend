@@ -68,6 +68,7 @@ class SuperAdminAnalyticsController extends Controller
             ->map(fn (Organization $organization): array => [
                 'id' => $organization->public_id,
                 'name' => $organization->name,
+                'kind' => ($organization->settings['kind'] ?? null) === 'individual' ? 'individual' : 'organization',
                 'status' => $organization->status?->value ?? $organization->status,
                 'users_count' => (int) $organization->users_count,
                 'extensions_count' => (int) $organization->extensions_count,

@@ -15,6 +15,7 @@ class CreateOrganization
     {
         return DB::transaction(function () use ($owner, $attributes): Organization {
             $assignOwnerExtension = (bool) Arr::pull($attributes, 'assign_owner_extension', false);
+            $attributes['name'] = $this->uniqueName($attributes['name']);
             $organization = Organization::query()->create($attributes);
 
             $workspaceName = $organization->isPersonalWorkspace()
@@ -39,5 +40,25 @@ class CreateOrganization
 
             return $organization;
         });
+    }
+
+    /**
+     * Two different people can share a real name (a signup's auto-generated
+     * "{name} Workspace" is not something either of them chose or can be
+     * asked to change) - disambiguate with a trailing " (2)", " (3)", etc.
+     * instead of rejecting the name outright.
+     */
+    private function uniqueName(string $name): string
+    {
+        if (! Organization::query()->where('name', $name)->exists()) {
+            return $name;
+        }
+
+        for ($suffix = 2; ; $suffix++) {
+            $candidate = "{$name} ({$suffix})";
+            if (! Organization::query()->where('name', $candidate)->exists()) {
+                return $candidate;
+            }
+        }
     }
 }

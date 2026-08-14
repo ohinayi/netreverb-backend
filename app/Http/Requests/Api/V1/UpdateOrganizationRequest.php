@@ -19,7 +19,14 @@ class UpdateOrganizationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'string', 'min:2', 'max:120'],
+            'name' => [
+                'sometimes',
+                'string',
+                'min:2',
+                'max:120',
+                Rule::unique((new Organization)->getTable(), 'name')
+                    ->ignore($this->route('organization')),
+            ],
             'slug' => [
                 'sometimes',
                 'string',
