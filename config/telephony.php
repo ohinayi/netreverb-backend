@@ -30,6 +30,36 @@ return [
         'base_path' => env('FREESWITCH_RECORDINGS_BASE_PATH', env('FREESWITCH_RECORDINGS_DIR', storage_path('app/public/recordings/conferences'))),
         'retention_days' => (int) env('FREESWITCH_RECORDING_RETENTION_DAYS', 30),
     ],
+    'ai_assistant' => [
+        'disk' => env('AI_ASSISTANT_RECORDINGS_DISK', 'ai_assistant_recordings'),
+        // FreeSWITCH itself always writes the recording here - this must be
+        // a real path on the FreeSWITCH box (matching call_recordings'
+        // sync.remote_base convention below), not wherever this app happens
+        // to be running.
+        'base_path' => env('AI_ASSISTANT_RECORDINGS_BASE_PATH', '/usr/local/freeswitch/var/lib/freeswitch/recordings/ai-assistant'),
+        // FreeSWITCH's own silence-detection on `record`, not a separate
+        // VAD library - a caller keeps talking through pauses shorter than
+        // silence_hits; going quiet for that long ends the recording. These
+        // are reasonable defaults but genuinely need tuning against the
+        // live FreeSWITCH box/codec rather than trusted blindly.
+        'record_max_seconds' => (int) env('AI_ASSISTANT_RECORD_MAX_SECONDS', 20),
+        'record_silence_threshold' => (int) env('AI_ASSISTANT_RECORD_SILENCE_THRESHOLD', 200),
+        'record_silence_hits' => (int) env('AI_ASSISTANT_RECORD_SILENCE_HITS', 3),
+        'max_retries' => (int) env('AI_ASSISTANT_MAX_RETRIES', 2),
+        'remote_fetch' => [
+            // In production this app runs on the same VPS as FreeSWITCH, so
+            // base_path is already directly readable and this stays off. In
+            // local dev, FreeSWITCH runs on the VPS while this app runs on
+            // a laptop - the just-recorded clip has to be pulled over SSH
+            // before it can be transcribed, synchronously, since the caller
+            // is on the line waiting for the confirmation prompt. Reuses
+            // the same credentials as call_recordings.sync below.
+            'enabled' => env('AI_ASSISTANT_RECORDINGS_REMOTE_FETCH_ENABLED', false),
+            'host' => env('AI_ASSISTANT_RECORDINGS_SYNC_HOST', env('FREESWITCH_CALL_RECORDINGS_SYNC_HOST', 'sip.classyra.com.ng')),
+            'user' => env('AI_ASSISTANT_RECORDINGS_SYNC_USER', env('FREESWITCH_CALL_RECORDINGS_SYNC_USER', 'deploy')),
+            'password' => env('AI_ASSISTANT_RECORDINGS_SYNC_PASSWORD', env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD')),
+        ],
+    ],
     'call_recordings' => [
         'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
         'base_path' => env('FREESWITCH_CALL_RECORDINGS_BASE_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', storage_path('app/public/recordings/calls'))),

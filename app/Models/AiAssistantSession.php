@@ -10,9 +10,9 @@ class AiAssistantSession extends Model
 {
     use BelongsToWorkspace, HasUlids;
 
-    protected $fillable = ['organization_id', 'workspace_id', 'ai_assistant_id', 'call_log_id', 'status', 'transcript', 'captured_data', 'provider_metadata', 'duration_seconds', 'started_at', 'completed_at'];
+    protected $fillable = ['organization_id', 'workspace_id', 'ai_assistant_id', 'call_log_id', 'freeswitch_uuid', 'status', 'transcript', 'captured_data', 'provider_metadata', 'current_field_key', 'pending_value', 'retry_count', 'duration_seconds', 'started_at', 'completed_at'];
 
-    protected $attributes = ['status' => 'pending', 'duration_seconds' => 0];
+    protected $attributes = ['status' => 'pending', 'duration_seconds' => 0, 'retry_count' => 0];
 
     public function uniqueIds(): array
     {
@@ -36,6 +36,6 @@ class AiAssistantSession extends Model
 
     protected function casts(): array
     {
-        return ['captured_data' => 'array', 'provider_metadata' => 'array', 'duration_seconds' => 'integer', 'started_at' => 'datetime', 'completed_at' => 'datetime'];
+        return ['captured_data' => 'array', 'provider_metadata' => 'array', 'retry_count' => 'integer', 'duration_seconds' => 'integer', 'started_at' => 'datetime', 'completed_at' => 'datetime'];
     }
 }

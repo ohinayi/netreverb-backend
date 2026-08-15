@@ -96,6 +96,53 @@ class ExtensionApiTest extends TestCase
         $this->assertSame($member->id, Extension::query()->sole()->user_id);
     }
 
+    public function test_a_user_already_assigned_to_an_extension_cannot_be_assigned_to_a_second_one(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $member = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($member)->create();
+        Queue::fake();
+        Sanctum::actingAs($owner);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/extensions", [
+            'number' => '45108', 'display_name' => 'First Desk', 'type' => 'user', 'user_public_id' => $member->public_id,
+        ])->assertCreated();
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/extensions", [
+            'number' => '45109', 'display_name' => 'Second Desk', 'type' => 'user', 'user_public_id' => $member->public_id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('user_public_id');
+
+        $this->assertSame(1, Extension::query()->where('user_id', $member->id)->count());
+    }
+
+    public function test_editing_an_extension_can_keep_its_own_assignee_but_not_steal_someone_elses(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $memberA = User::factory()->create();
+        $memberB = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($memberA)->create();
+        OrganizationMembership::factory()->for($organization)->for($memberB)->create();
+        Queue::fake();
+        Sanctum::actingAs($owner);
+
+        $extensionA = $this->postJson("/api/v1/organizations/{$organization->public_id}/extensions", [
+            'number' => '45110', 'display_name' => 'Desk A', 'type' => 'user', 'user_public_id' => $memberA->public_id,
+        ])->assertCreated()->json('data.id');
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/extensions", [
+            'number' => '45111', 'display_name' => 'Desk B', 'type' => 'user', 'user_public_id' => $memberB->public_id,
+        ])->assertCreated();
+
+        // Re-saving the same assignee on its own extension must not trip the "already assigned" check.
+        $this->patchJson("/api/v1/organizations/{$organization->public_id}/extensions/{$extensionA}", [
+            'user_public_id' => $memberA->public_id,
+        ])->assertOk();
+
+        // But stealing memberB's assignment onto extension A must still be blocked.
+        $this->patchJson("/api/v1/organizations/{$organization->public_id}/extensions/{$extensionA}", [
+            'user_public_id' => $memberB->public_id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('user_public_id');
+    }
+
     public function test_a_number_cannot_collide_with_any_other_dialable_identity(): void
     {
         [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);

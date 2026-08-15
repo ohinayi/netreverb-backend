@@ -53,6 +53,7 @@ class UpdateExtensionRequest extends FormRequest
             $organization = $this->route('organization');
             if ($this->filled('user_public_id')) {
                 $user = User::query()->where('public_id', $this->string('user_public_id'))->first();
+                $current = $this->route('extension');
 
                 if ($organization instanceof Organization && $user !== null && ! OrganizationMembership::query()
                     ->whereBelongsTo($organization)
@@ -62,6 +63,18 @@ class UpdateExtensionRequest extends FormRequest
                     $validator->errors()->add(
                         'user_public_id',
                         'The selected user is not an active member of this organization.',
+                    );
+                } elseif ($organization instanceof Organization && $user !== null && Extension::query()
+                    ->where('user_id', $user->id)
+                    ->when($current instanceof Extension, fn ($query) => $query->whereKeyNot($current->id))
+                    ->exists()) {
+                    // Only one extension registers per softphone session right
+                    // now (AppLayout.vue picks the first active user/device
+                    // extension it finds) - a second assignment would just be
+                    // unreachable, so block it instead of allowing a dead one.
+                    $validator->errors()->add(
+                        'user_public_id',
+                        'This user is already assigned to another extension. Only one extension per user is supported right now.',
                     );
                 }
             }

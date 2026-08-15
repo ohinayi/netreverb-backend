@@ -12,7 +12,7 @@ class AiAssistant extends Model
 {
     use BelongsToWorkspace, HasUlids, SoftDeletes;
 
-    protected $fillable = ['organization_id', 'workspace_id', 'extension_id', 'name', 'enabled', 'language', 'welcome_message', 'system_instruction', 'knowledge', 'handoff_rules'];
+    protected $fillable = ['organization_id', 'workspace_id', 'extension_id', 'name', 'enabled', 'language', 'tts_voice', 'welcome_message', 'welcome_audio_path', 'closing_message', 'closing_audio_path', 'system_instruction', 'knowledge', 'handoff_rules'];
 
     protected $attributes = ['enabled' => false, 'language' => 'en'];
 

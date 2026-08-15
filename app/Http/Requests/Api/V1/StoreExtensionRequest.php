@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\V1;
 use App\Enums\ExtensionType;
 use App\Enums\MembershipStatus;
 use App\Models\DialableNumber;
+use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
@@ -66,6 +67,19 @@ class StoreExtensionRequest extends FormRequest
                 $validator->errors()->add(
                     'user_public_id',
                     'The selected user is not an active member of this organization.',
+                );
+
+                return;
+            }
+
+            // Only one extension registers per softphone session right now
+            // (AppLayout.vue picks the first active user/device extension it
+            // finds) - a second assignment would just be unreachable, so
+            // block it instead of letting an admin create a dead extension.
+            if (Extension::query()->where('user_id', $user->id)->exists()) {
+                $validator->errors()->add(
+                    'user_public_id',
+                    'This user is already assigned to another extension. Only one extension per user is supported right now.',
                 );
             }
         }];

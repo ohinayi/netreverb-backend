@@ -256,6 +256,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                     ->parameters(['ai-assistants' => 'aiAssistant']);
                 Route::get('organizations/{organization}/ai-assistants/{aiAssistant}/sessions', [AiAssistantController::class, 'sessions'])
                     ->name('organizations.ai-assistants.sessions.index');
+                Route::get('organizations/{organization}/ai-assistant-sessions', [AiAssistantController::class, 'allSessions'])
+                    ->name('organizations.ai-assistant-sessions.index');
                 Route::apiResource('organizations.departments', DepartmentController::class)
                     ->only(['index', 'store', 'update']);
                 Route::get('organizations/{organization}/members', [OrganizationController::class, 'members'])

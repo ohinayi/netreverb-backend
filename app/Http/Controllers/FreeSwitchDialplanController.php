@@ -2,13 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ServiceNumberType;
+use App\Models\AiAssistant;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
+use App\Services\Telephony\AiAssistantCallFlow;
 use Illuminate\Http\Request;
 
 class FreeSwitchDialplanController extends Controller
 {
+    public function __construct(private readonly AiAssistantCallFlow $aiAssistantCallFlow) {}
+
     public function __invoke(Request $request)
     {
         $token = (string) config('telephony.freeswitch.xml_curl_token');
@@ -35,11 +40,21 @@ class FreeSwitchDialplanController extends Controller
         if (str_starts_with($contextName, 'ivr-options-')) {
             return $this->ivrOptionResponse($request, $contextName);
         }
+        if (str_starts_with($contextName, AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX)) {
+            return $this->aiAssistantCallFlow->handleAnswer($request, $contextName);
+        }
+        if (str_starts_with($contextName, AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX)) {
+            return $this->aiAssistantCallFlow->handleConfirm($request, $contextName);
+        }
 
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
         $service = ServiceNumber::query()->where('enabled', true)->whereHas('dialableNumber', fn ($q) => $q->where('number', $number))->first();
         $ivrId = data_get($service?->configuration, 'ivr_public_id');
         $ivr = $ivrId ? $service?->organization?->ivrs()->with('options')->where('public_id', $ivrId)->where('enabled', true)->first() : null;
+        $assistantId = $service?->type === ServiceNumberType::Assistant ? data_get($service->configuration, 'ai_assistant_id') : null;
+        $assistant = $assistantId
+            ? AiAssistant::query()->with('fields')->where('organization_id', $service->organization_id)->where('public_id', $assistantId)->where('enabled', true)->first()
+            : null;
 
         $xml = new \DOMDocument('1.0', 'UTF-8');
         $document = $xml->appendChild($xml->createElement('document'));
@@ -97,6 +112,19 @@ class FreeSwitchDialplanController extends Controller
                 $optionsContext->setAttribute('name', $this->optionsContextName($ivr));
                 $this->appendOptionExtensions($xml, $optionsContext, $section, $options);
             }
+        } elseif ($assistant) {
+            $this->aiAssistantCallFlow->emitEntry($xml, $condition, $assistant);
+        } elseif ($assistantId || ($ivrId && ! $ivr)) {
+            // The service number is wired to an assistant or IVR that's
+            // since been disabled or deleted. Say so instead of leaving the
+            // caller in dead air - the flow never even started, so there's
+            // no in-progress call to fail partway through.
+            $unavailable = $condition->appendChild($xml->createElement('action'));
+            $unavailable->setAttribute('application', 'speak');
+            $unavailable->setAttribute('data', 'flite|slt|This service is temporarily unavailable. Please try again later.');
+            $hangup = $condition->appendChild($xml->createElement('action'));
+            $hangup->setAttribute('application', 'hangup');
+            $hangup->setAttribute('data', 'NORMAL_CLEARING');
         } elseif ($service?->target) {
             $action = $condition->appendChild($xml->createElement('action'));
             $action->setAttribute('application', 'bridge');

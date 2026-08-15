@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\UpsertAiAssistantRequest;
 use App\Http\Resources\Api\V1\AiAssistantResource;
 use App\Http\Resources\Api\V1\AiAssistantSessionResource;
+use App\Jobs\SynthesizeAiAssistantQuestions;
 use App\Models\AiAssistant;
+use App\Models\AiAssistantSession;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Services\Auditing\AuditLogger;
@@ -42,6 +44,7 @@ class AiAssistantController extends Controller
 
             return $assistant;
         });
+        SynthesizeAiAssistantQuestions::dispatch($assistant->id);
         $this->auditLogger->record($request, $request->user(), $organization, 'ai_assistant.created', $assistant);
 
         return AiAssistantResource::make($assistant->load($this->relations()))
@@ -56,7 +59,7 @@ class AiAssistantController extends Controller
         Gate::authorize('update', $organization);
         abort_unless($aiAssistant->organization_id === $organization->id, 404);
         $attributes = $request->validated();
-        $before = $aiAssistant->only(['name', 'extension_id', 'enabled', 'language', 'welcome_message', 'system_instruction', 'knowledge', 'handoff_rules']);
+        $before = $aiAssistant->only(['name', 'extension_id', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']);
 
         DB::transaction(function () use ($aiAssistant, $organization, $attributes): void {
             $aiAssistant->update($this->assistantAttributes($organization, $attributes));
@@ -64,8 +67,9 @@ class AiAssistantController extends Controller
                 $this->replaceFields($aiAssistant, $attributes['fields']);
             }
         });
+        SynthesizeAiAssistantQuestions::dispatch($aiAssistant->id);
         $fresh = $aiAssistant->fresh()->load($this->relations());
-        $this->auditLogger->record($request, $request->user(), $organization, 'ai_assistant.updated', $fresh, $before, $fresh->only(['name', 'extension_id', 'enabled', 'language', 'welcome_message', 'system_instruction', 'knowledge', 'handoff_rules']));
+        $this->auditLogger->record($request, $request->user(), $organization, 'ai_assistant.updated', $fresh, $before, $fresh->only(['name', 'extension_id', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']));
 
         return AiAssistantResource::make($fresh);
     }
@@ -91,6 +95,25 @@ class AiAssistantController extends Controller
         );
     }
 
+    /** Every session across every assistant in the org, newest first - the call log for assisted calls. */
+    public function allSessions(Request $request, Organization $organization): AnonymousResourceCollection
+    {
+        Gate::authorize('view', $organization);
+
+        $query = AiAssistantSession::query()
+            ->where('organization_id', $organization->id)
+            ->with(['assistant:id,public_id,name', 'callLog:id,public_id,caller_number']);
+
+        if ($request->filled('assistant_id')) {
+            $query->whereHas('assistant', fn ($assistantQuery) => $assistantQuery->where('public_id', $request->string('assistant_id')));
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->string('status'));
+        }
+
+        return AiAssistantSessionResource::collection($query->latest('id')->paginate(30)->withQueryString());
+    }
+
     /** @param array<string, mixed> $attributes */
     private function assistantAttributes(Organization $organization, array $attributes): array
     {
@@ -109,7 +132,7 @@ class AiAssistantController extends Controller
         }
 
         return [
-            ...Arr::only($attributes, ['name', 'enabled', 'language', 'welcome_message', 'system_instruction', 'knowledge', 'handoff_rules']),
+            ...Arr::only($attributes, ['name', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']),
             'extension_id' => $extensionId,
         ];
     }

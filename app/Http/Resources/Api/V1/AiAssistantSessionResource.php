@@ -12,6 +12,8 @@ class AiAssistantSessionResource extends JsonResource
     {
         return [
             'id' => $this->public_id,
+            'assistant_id' => $this->whenLoaded('assistant', fn (): ?string => $this->assistant?->public_id),
+            'assistant_name' => $this->whenLoaded('assistant', fn (): ?string => $this->assistant?->name),
             'status' => $this->status,
             'transcript' => $this->transcript,
             'captured_data' => $this->captured_data,
