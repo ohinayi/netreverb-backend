@@ -9,6 +9,7 @@ use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
 use App\Services\Telephony\AiAssistantCallFlow;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class FreeSwitchDialplanController extends Controller
 {
@@ -141,6 +142,7 @@ class FreeSwitchDialplanController extends Controller
                 (int) config('telephony.sip_port'),
             ));
         }
+
         return response($xml->saveXML(), 200, ['Content-Type' => 'text/xml; charset=UTF-8']);
     }
 
@@ -185,11 +187,11 @@ class FreeSwitchDialplanController extends Controller
      * inbound call and for a `submenu` option nested inside another IVR -
      * the two cases are otherwise identical.
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\OrganizationIvrOption>|null the
-     *   IVR's enabled options, for the caller to (optionally) embed as a
-     *   bonus inline context - or null if it has none.
+     * @return Collection<int, OrganizationIvrOption>|null the
+     *                                                     IVR's enabled options, for the caller to (optionally) embed as a
+     *                                                     bonus inline context - or null if it has none.
      */
-    private function appendMenuActions(\DOMDocument $xml, \DOMElement $condition, OrganizationIvr $ivr): ?\Illuminate\Support\Collection
+    private function appendMenuActions(\DOMDocument $xml, \DOMElement $condition, OrganizationIvr $ivr): ?Collection
     {
         // Give the caller a short moment before speech starts; this avoids
         // clipping the first syllables on SIP/WebRTC endpoints that are
@@ -224,7 +226,7 @@ class FreeSwitchDialplanController extends Controller
         }
 
         if (! $generatedPrompt) {
-            $menuText = ' Please choose an option. ' . $options
+            $menuText = ' Please choose an option. '.$options
                 ->map(fn ($option): string => 'Press '.$option->digit.' for '.$option->label.'.')
                 ->implode(' ');
             $action = $condition->appendChild($xml->createElement('action'));
@@ -269,7 +271,7 @@ class FreeSwitchDialplanController extends Controller
         }
     }
 
-    /** @param \Illuminate\Support\Collection<int, \App\Models\OrganizationIvrOption> $options */
+    /** @param Collection<int, OrganizationIvrOption> $options */
     private function appendOptionExtensions(\DOMDocument $xml, \DOMElement $context, \DOMElement $section, $options): void
     {
         // Create an exact route for each key press in the IVR's own
