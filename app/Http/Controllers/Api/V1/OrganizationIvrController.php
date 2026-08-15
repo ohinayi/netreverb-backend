@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SynthesizeIvrPrompts;
 use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Services\Telephony\PiperTtsService;
@@ -236,8 +237,12 @@ class OrganizationIvrController extends Controller
 
         $ivr->options()->delete();
         $ivr->options()->createMany($options);
-        $this->synthesizePrompt($ivr, $options);
-        $this->synthesizeDirectives($ivr);
+        // Piper synthesis is a subprocess call per prompt; a tree with a
+        // nested submenu and a few directives can chain enough of them to
+        // blow past the frontend's request timeout if run inline here.
+        // The dialplan already falls back to live flite speech for
+        // anything not yet cached, so queuing this is free.
+        SynthesizeIvrPrompts::dispatch($ivr->id);
 
         return $ivr;
     }
@@ -248,51 +253,6 @@ class OrganizationIvrController extends Controller
         $membership = request()->user()?->organizations()->whereKey($organization->getKey())->first();
         abort_unless($membership, 403);
         if ($manage) abort_unless(in_array($membership->pivot->role ?? null, ['owner', 'admin'], true), 403);
-    }
-
-    private function synthesizePrompt(OrganizationIvr $ivr, array $options): void
-    {
-        // Uploaded audio always wins. Generated Piper files are identified by
-        // their deterministic path and may be safely regenerated when the
-        // welcome text or menu options are edited.
-        $generatedPath = 'ivr-welcome/'.$ivr->organization->public_id.'/'.$ivr->public_id.'.wav';
-        $hasGeneratedAudio = $ivr->welcome_audio_path === $generatedPath;
-        if ($ivr->welcome_audio_path && ! $hasGeneratedAudio) return;
-        if (! $ivr->welcome_text) {
-            if ($hasGeneratedAudio) {
-                Storage::disk('public')->delete($generatedPath);
-                $ivr->update(['welcome_audio_path' => null]);
-            }
-            return;
-        }
-        $menu = collect($options)->where('enabled', true)->map(
-            fn (array $option): string => 'Press '.$option['digit'].' for '.$option['label'].'.'
-        )->implode(' ');
-        $text = trim($ivr->welcome_text.'. '.$menu);
-        $generated = app(PiperTtsService::class)->generate($text, $generatedPath, $ivr->tts_voice, $ivr->tts_speed);
-        if ($generated) $ivr->update(['welcome_audio_path' => $generated]);
-    }
-
-    /**
-     * Pre-generates the TTS audio for every 'directive' option, the same
-     * way synthesizePrompt() does for the welcome prompt: once at save time
-     * so a live call only ever plays a cached file.
-     */
-    private function synthesizeDirectives(OrganizationIvr $ivr): void
-    {
-        foreach ($ivr->options as $option) {
-            if ($option->destination_type !== 'directive') continue;
-            $generatedPath = 'ivr-directive/'.$ivr->organization->public_id.'/'.$ivr->public_id.'-'.$option->digit.'.wav';
-            if (! $option->directive_text) {
-                if ($option->directive_audio_path === $generatedPath) {
-                    Storage::disk('public')->delete($generatedPath);
-                    $option->update(['directive_audio_path' => null]);
-                }
-                continue;
-            }
-            $generated = app(PiperTtsService::class)->generate($option->directive_text, $generatedPath, $ivr->tts_voice, $ivr->tts_speed);
-            if ($generated) $option->update(['directive_audio_path' => $generated]);
-        }
     }
 
     public function preview(Request $request, Organization $organization)
