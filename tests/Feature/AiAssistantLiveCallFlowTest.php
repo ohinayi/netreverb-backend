@@ -252,4 +252,74 @@ class AiAssistantLiveCallFlowTest extends TestCase
         $this->assertSame(0, $session->retry_count);
         $this->assertSame('email', $session->current_field_key);
     }
+
+    public function test_a_boolean_field_reads_a_single_digit_with_no_recording_and_skips_confirmation(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create(['organization_id' => $organization->id, 'name' => 'Orders', 'enabled' => true]);
+        AiAssistantField::query()->create(['ai_assistant_id' => $assistant->id, 'key' => 'wants_delivery', 'label' => 'Delivery?', 'field_type' => 'boolean', 'question' => 'Do you want delivery?', 'sort_order' => 0]);
+        AiAssistantField::query()->create(['ai_assistant_id' => $assistant->id, 'key' => 'notes', 'label' => 'Notes', 'question' => 'Anything else?', 'sort_order' => 1]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'wants_delivery', 'started_at' => now(),
+        ]);
+
+        $entry = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::DTMF_CONTEXT_PREFIX.$session->public_id.'&destination_number=1'
+        )->assertOk();
+
+        // The next field ('notes') is free text, so its own turn correctly
+        // uses record - what matters here is that the boolean field itself
+        // never went through a recording at all, which is implicit in
+        // there being no fake transcription/extraction bound in this test.
+        $this->assertStringContainsString('Anything else?', $entry->getContent());
+        $session->refresh();
+        $this->assertSame(['wants_delivery' => 'Yes'], $session->captured_data);
+        $this->assertSame('notes', $session->current_field_key);
+    }
+
+    public function test_a_phone_field_captures_typed_digits_directly(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create(['organization_id' => $organization->id, 'name' => 'Orders', 'enabled' => true]);
+        AiAssistantField::query()->create(['ai_assistant_id' => $assistant->id, 'key' => 'phone', 'label' => 'Phone', 'field_type' => 'phone', 'question' => 'What is your phone number?', 'sort_order' => 0]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'phone', 'started_at' => now(),
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::DTMF_CONTEXT_PREFIX.$session->public_id.'&destination_number=07044610992%23'
+        )->assertOk();
+
+        $this->assertStringContainsString('application="hangup"', $response->getContent());
+        $session->refresh();
+        $this->assertSame(['phone' => '07044610992'], $session->captured_data);
+        $this->assertSame('completed', $session->status);
+    }
+
+    public function test_an_invalid_boolean_digit_triggers_a_redo_without_touching_transcription_or_extraction(): void
+    {
+        $this->allowXmlCurl();
+        $aiState = $this->fakeAiProviders('should not be called', 'should not be called');
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create(['organization_id' => $organization->id, 'name' => 'Orders', 'enabled' => true]);
+        AiAssistantField::query()->create(['ai_assistant_id' => $assistant->id, 'key' => 'wants_delivery', 'label' => 'Delivery?', 'field_type' => 'boolean', 'question' => 'Do you want delivery?', 'sort_order' => 0]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'wants_delivery', 'started_at' => now(),
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::DTMF_CONTEXT_PREFIX.$session->public_id.'&destination_number=9'
+        )->assertOk();
+
+        $this->assertStringContainsString('Do you want delivery?', $response->getContent());
+        $this->assertNull($aiState->lastInstruction);
+        $session->refresh();
+        $this->assertSame(1, $session->retry_count);
+        $this->assertNull($session->captured_data);
+    }
 }

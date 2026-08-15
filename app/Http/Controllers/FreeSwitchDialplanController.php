@@ -46,6 +46,9 @@ class FreeSwitchDialplanController extends Controller
         if (str_starts_with($contextName, AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX)) {
             return $this->aiAssistantCallFlow->handleConfirm($request, $contextName);
         }
+        if (str_starts_with($contextName, AiAssistantCallFlow::DTMF_CONTEXT_PREFIX)) {
+            return $this->aiAssistantCallFlow->handleDtmfAnswer($request, $contextName);
+        }
 
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
         $service = ServiceNumber::query()->where('enabled', true)->whereHas('dialableNumber', fn ($q) => $q->where('number', $number))->first();

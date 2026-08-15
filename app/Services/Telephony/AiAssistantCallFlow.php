@@ -35,6 +35,19 @@ class AiAssistantCallFlow
 
     public const CONFIRM_CONTEXT_PREFIX = 'ai-assistant-confirm-';
 
+    public const DTMF_CONTEXT_PREFIX = 'ai-assistant-dtmf-';
+
+    /**
+     * These field types skip speech (record/transcribe/extract/confirm)
+     * entirely and read DTMF digits instead: a caller reciting a phone
+     * number, or picking yes/no, is exactly what Whisper+Gemini were
+     * getting wrong most often (a single misheard digit is a dead number),
+     * and keypad entry is unambiguous - so there's nothing to confirm and
+     * nothing to transcribe. Free-text fields (name, address, ...) can't
+     * reasonably move to a keypad, so they keep the speech path.
+     */
+    private const DTMF_FIELD_TYPES = ['boolean', 'phone', 'number'];
+
     public function __construct(
         private readonly PiperTtsService $piper,
         private readonly AudioTranscriptionProvider $transcription,
@@ -66,7 +79,7 @@ class AiAssistantCallFlow
         }
 
         $session->update(['current_field_key' => $firstField->key]);
-        $this->emitQuestionAndRecord($xml, $condition, $session, $firstField);
+        $this->emitQuestionForField($xml, $condition, $session, $firstField);
     }
 
     /**
@@ -166,6 +179,95 @@ class AiAssistantCallFlow
         return $this->respond($xml);
     }
 
+    private function emitQuestionForField(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): void
+    {
+        if (in_array($field->field_type, self::DTMF_FIELD_TYPES, true)) {
+            $this->emitQuestionAndCollectDtmf($xml, $condition, $session, $field);
+
+            return;
+        }
+
+        $this->emitQuestionAndRecord($xml, $condition, $session, $field);
+    }
+
+    /**
+     * Serves the re-fetch after a DTMF `read` completes: no Whisper, no
+     * Gemini, no confirm step - the digits the caller typed are exactly
+     * the answer, so there's nothing to transcribe or double-check.
+     */
+    public function handleDtmfAnswer(Request $request, string $contextName)
+    {
+        $digits = trim((string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number')), '#');
+        $publicId = substr($contextName, strlen(self::DTMF_CONTEXT_PREFIX));
+        [$xml, $context, $condition] = $this->skeleton($contextName);
+        $session = AiAssistantSession::query()->with('assistant.fields')->where('public_id', $publicId)->first();
+
+        if (! $session || $session->status !== 'in_progress') {
+            $this->appendHangup($xml, $condition);
+
+            return $this->respond($xml);
+        }
+
+        $field = $session->assistant->fields->firstWhere('key', $session->current_field_key);
+        if (! $field) {
+            $this->finishSessionAndSayGoodbye($xml, $condition, $session);
+
+            return $this->respond($xml);
+        }
+
+        $value = $this->normalizeDtmfValue($field, $digits);
+        $session->update(['transcript' => trim(($session->transcript ?? '')."\n".$field->key.' (typed): '.$digits)]);
+
+        if ($value === null) {
+            $this->emitRedoOrSkip($xml, $condition, $session, $field);
+
+            return $this->respond($xml);
+        }
+
+        $captured = $session->captured_data ?? [];
+        $captured[$field->key] = $value;
+        $session->update(['captured_data' => $captured, 'retry_count' => 0]);
+        $this->advanceToNextFieldOrFinish($xml, $condition, $session);
+
+        return $this->respond($xml);
+    }
+
+    private function normalizeDtmfValue(AiAssistantField $field, string $digits): ?string
+    {
+        if ($digits === '') return null;
+        if ($field->field_type === 'boolean') {
+            return match ($digits) {
+                '1' => 'Yes',
+                '2' => 'No',
+                default => null,
+            };
+        }
+
+        return $digits;
+    }
+
+    private function emitQuestionAndCollectDtmf(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): void
+    {
+        $this->appendSleep($xml, $condition);
+        $this->appendPlaybackOrSpeak($xml, $condition, $field->question_audio_path, $field->question);
+
+        $voice = $session->assistant->tts_voice ?: AiAssistantPromptSynthesizer::DEFAULT_VOICE;
+        $isBoolean = $field->field_type === 'boolean';
+        $this->appendPlaybackOrSpeak(
+            $xml, $condition,
+            $this->sharedPromptIfExists(AiAssistantPromptSynthesizer::sharedPromptPath($voice, $isBoolean ? 'dtmf-boolean-prompt' : 'dtmf-number-prompt')),
+            $isBoolean ? AiAssistantPromptSynthesizer::DTMF_BOOLEAN_PROMPT_TEXT : AiAssistantPromptSynthesizer::DTMF_NUMBER_PROMPT_TEXT,
+        );
+
+        $action = $condition->appendChild($xml->createElement('action'));
+        $action->setAttribute('application', 'read');
+        // read syntax: min, max, prompt, variable, timeout(ms), terminator.
+        // Boolean caps at exactly 1 digit so it self-terminates; everything
+        // else accepts up to 20 and waits for '#'.
+        $action->setAttribute('data', ($isBoolean ? '1 1' : '1 20').' silence_stream://500 ai_dtmf_value 20000 #');
+        $this->appendTransfer($xml, $condition, '${ai_dtmf_value}', self::DTMF_CONTEXT_PREFIX.$session->public_id);
+    }
+
     private function emitQuestionAndRecord(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): void
     {
         $this->appendSleep($xml, $condition);
@@ -210,7 +312,7 @@ class AiAssistantCallFlow
             $this->sharedPromptIfExists(AiAssistantPromptSynthesizer::sharedPromptPath($voice, 'redo-prompt')),
             AiAssistantPromptSynthesizer::REDO_PROMPT_TEXT,
         );
-        $this->emitQuestionAndRecord($xml, $condition, $session->fresh(), $field);
+        $this->emitQuestionForField($xml, $condition, $session->fresh(), $field);
     }
 
     private function advanceToNextFieldOrFinish(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
@@ -221,7 +323,7 @@ class AiAssistantCallFlow
 
         if ($next) {
             $session->update(['current_field_key' => $next->key]);
-            $this->emitQuestionAndRecord($xml, $condition, $session->fresh(), $next);
+            $this->emitQuestionForField($xml, $condition, $session->fresh(), $next);
 
             return;
         }

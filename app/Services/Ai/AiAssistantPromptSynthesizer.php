@@ -26,6 +26,10 @@ class AiAssistantPromptSynthesizer
 
     public const REDO_PROMPT_TEXT = "Sorry, let's try that again.";
 
+    public const DTMF_NUMBER_PROMPT_TEXT = 'Enter it now on your keypad, then press the pound key.';
+
+    public const DTMF_BOOLEAN_PROMPT_TEXT = 'Press 1 for yes, or 2 for no.';
+
     public function __construct(private readonly PiperTtsService $piper) {}
 
     public function synthesizeAll(AiAssistant $assistant): void
@@ -36,6 +40,8 @@ class AiAssistantPromptSynthesizer
         $this->synthesizeMessage($assistant, $voice, 'closing_message', 'closing_audio_path', 'closing');
         $this->synthesizeShared($voice, self::CONFIRM_PROMPT_TEXT, self::sharedPromptPath($voice, 'confirm-prompt'));
         $this->synthesizeShared($voice, self::REDO_PROMPT_TEXT, self::sharedPromptPath($voice, 'redo-prompt'));
+        $this->synthesizeShared($voice, self::DTMF_NUMBER_PROMPT_TEXT, self::sharedPromptPath($voice, 'dtmf-number-prompt'));
+        $this->synthesizeShared($voice, self::DTMF_BOOLEAN_PROMPT_TEXT, self::sharedPromptPath($voice, 'dtmf-boolean-prompt'));
 
         foreach ($assistant->fields as $field) {
             $text = trim((string) $field->question);
