@@ -40,6 +40,46 @@ class ServiceNumberApiTest extends TestCase
         $this->assertModelExists(ServiceNumber::query()->sole());
     }
 
+    public function test_editing_an_auto_activated_service_number_does_not_knock_it_back_to_pending(): void
+    {
+        config()->set('telephony.service_numbers.auto_activate', true);
+        $admin = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $created = $this->postJson("/api/v1/organizations/{$organization->public_id}/service-numbers", [
+            'number' => '459667', 'name' => 'Assistant line', 'type' => 'assistant', 'target' => '9667',
+        ])->assertCreated();
+        $this->assertSame('active', $created->json('data.provisioning_status'));
+
+        $edited = $this->patchJson("/api/v1/organizations/{$organization->public_id}/service-numbers/{$created->json('data.id')}", [
+            'configuration' => ['ai_assistant_id' => 'some-assistant-id'],
+        ])->assertOk();
+
+        $this->assertSame('active', $edited->json('data.provisioning_status'));
+    }
+
+    public function test_editing_a_service_number_without_auto_activate_keeps_it_pending(): void
+    {
+        config()->set('telephony.service_numbers.auto_activate', false);
+        $admin = User::factory()->create();
+        $organization = Organization::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $created = $this->postJson("/api/v1/organizations/{$organization->public_id}/service-numbers", [
+            'number' => '459668', 'name' => 'Needs real provisioning', 'type' => 'custom', 'target' => '9668',
+        ])->assertCreated();
+        $this->assertSame('pending', $created->json('data.provisioning_status'));
+
+        $edited = $this->patchJson("/api/v1/organizations/{$organization->public_id}/service-numbers/{$created->json('data.id')}", [
+            'name' => 'Renamed',
+        ])->assertOk();
+
+        $this->assertSame('pending', $edited->json('data.provisioning_status'));
+    }
+
     public function test_member_cannot_manage_service_numbers(): void
     {
         $member = User::factory()->create();
