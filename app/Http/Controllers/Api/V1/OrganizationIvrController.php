@@ -132,17 +132,6 @@ class OrganizationIvrController extends Controller
                 throw ValidationException::withMessages(['service_number_id' => 'Select an active service number assigned to this organization.']);
             }
         }
-        foreach ($data['options'] ?? [] as $index => $option) {
-            if ($option['destination_type'] === 'submenu') {
-                $exists = $organization->ivrs()->where('public_id', $option['destination'] ?? null)->exists();
-                if (! $exists) {
-                    throw ValidationException::withMessages(["options.{$index}.destination" => 'Select an existing IVR menu in this organization to nest as a submenu.']);
-                }
-            }
-            if ($option['destination_type'] === 'directive' && ! trim($option['directive_text'] ?? '')) {
-                throw ValidationException::withMessages(["options.{$index}.directive_text" => 'Enter the message to play for this directive.']);
-            }
-        }
 
         return $data;
     }
