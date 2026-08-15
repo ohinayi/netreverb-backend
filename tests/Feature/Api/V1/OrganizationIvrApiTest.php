@@ -66,6 +66,29 @@ class OrganizationIvrApiTest extends TestCase
         $this->assertDatabaseHas('organization_ivrs', ['organization_id' => $organization->id, 'name' => 'Dressing help']);
     }
 
+    public function test_editing_an_ivr_can_attach_a_service_number_it_did_not_have_at_creation(): void
+    {
+        $organization = Organization::factory()->create();
+        $this->actingAsAdmin($organization);
+        $service = ServiceNumber::factory()->for($organization)->create();
+        $ivr = OrganizationIvr::create(['organization_id' => $organization->id, 'name' => 'Main Base', 'enabled' => true]);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs/{$ivr->public_id}", [
+            '_method' => 'PATCH',
+            'service_number_id' => $service->public_id,
+            'name' => 'Main Base',
+            'options' => [
+                ['digit' => '1', 'label' => 'Sales', 'destination_type' => 'hangup', 'sort_order' => 0],
+            ],
+        ])->assertOk();
+
+        $this->assertSame($ivr->public_id, $service->fresh()->configuration['ivr_public_id'] ?? null);
+
+        $indexResponse = $this->getJson("/api/v1/organizations/{$organization->public_id}/ivrs")->assertOk();
+        $listed = collect($indexResponse->json('data'))->firstWhere('public_id', $ivr->public_id);
+        $this->assertSame($service->public_id, $listed['service_number_id']);
+    }
+
     public function test_admin_can_build_a_nested_submenu_inline_without_creating_a_separate_ivr_first(): void
     {
         $organization = Organization::factory()->create();

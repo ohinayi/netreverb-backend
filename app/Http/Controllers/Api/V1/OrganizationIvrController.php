@@ -19,7 +19,25 @@ class OrganizationIvrController extends Controller
     public function index(Organization $organization)
     {
         $this->authorizeOrganization($organization);
-        return response()->json(['data' => $organization->ivrs()->with('options')->latest()->get()]);
+        $ivrs = $organization->ivrs()->with('options')->latest()->get();
+        $serviceNumberByIvrId = $this->serviceNumberByIvrPublicId($organization);
+        $ivrs->each(fn (OrganizationIvr $ivr) => $ivr->setAttribute('service_number_id', $serviceNumberByIvrId->get($ivr->public_id)));
+        return response()->json(['data' => $ivrs]);
+    }
+
+    /**
+     * A service number's inbound routing points at an IVR via
+     * configuration->ivr_public_id - there's no column on organization_ivrs
+     * pointing the other way, so this is the only way to tell the builder
+     * UI which number (if any) is already attached to a given menu.
+     *
+     * @return \Illuminate\Support\Collection<string, string> ivr public_id => service number public_id
+     */
+    private function serviceNumberByIvrPublicId(Organization $organization): \Illuminate\Support\Collection
+    {
+        return $organization->serviceNumbers()->get(['public_id', 'configuration'])
+            ->filter(fn ($service) => ! empty($service->configuration['ivr_public_id'] ?? null))
+            ->mapWithKeys(fn ($service) => [$service->configuration['ivr_public_id'] => $service->public_id]);
     }
 
     public function store(Request $request, Organization $organization)
@@ -31,14 +49,7 @@ class OrganizationIvrController extends Controller
         }
         $options = $this->normalizeOptions($request->input('options', []), $organization, 0);
         $ivr = $this->persistTree($organization, $data, $options, null);
-        // A submenu that only ever gets reached by nesting under another
-        // IVR's option has no service number of its own to dial into.
-        if (! empty($data['service_number_id'])) {
-            $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
-            $configuration = $service->configuration ?? [];
-            $configuration['ivr_public_id'] = $ivr->public_id;
-            $service->update(['configuration' => $configuration]);
-        }
+        $this->attachServiceNumber($organization, $ivr, $data);
         return response()->json(['data' => $ivr->load('options')], 201);
     }
 
@@ -57,7 +68,24 @@ class OrganizationIvrController extends Controller
         } else {
             $ivr->update(collect($data)->except('service_number_id')->all());
         }
+        $this->attachServiceNumber($organization, $ivr, $data);
         return response()->json(['data' => $ivr->fresh('options')]);
+    }
+
+    /**
+     * Points a service number's inbound routing at this IVR - the only way
+     * a menu becomes directly dialable rather than reachable purely as a
+     * nested submenu. Runs on both create and edit, since a menu that
+     * started as submenu-only (no service number picked at creation) can
+     * later be given one from the edit form.
+     */
+    private function attachServiceNumber(Organization $organization, OrganizationIvr $ivr, array $data): void
+    {
+        if (empty($data['service_number_id'])) return;
+        $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
+        $configuration = $service->configuration ?? [];
+        $configuration['ivr_public_id'] = $ivr->public_id;
+        $service->update(['configuration' => $configuration]);
     }
 
     public function destroy(Organization $organization, OrganizationIvr $ivr)
@@ -72,6 +100,7 @@ class OrganizationIvrController extends Controller
     {
         $this->authorizeOrganization($organization);
         abort_unless((int) $ivr->organization_id === (int) $organization->getKey(), 404);
+        $ivr->setAttribute('service_number_id', $this->serviceNumberByIvrPublicId($organization)->get($ivr->public_id));
         return response()->json(['data' => $ivr->load('options')]);
     }
 
