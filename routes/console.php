@@ -2,6 +2,7 @@
 
 use App\Jobs\CleanupCallRecordings;
 use App\Jobs\CleanupConferenceRecordings;
+use App\Jobs\ExpireStaleAiAssistantSessions;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -42,6 +43,11 @@ Schedule::job(new CleanupConferenceRecordings)
 
 Schedule::job(new CleanupCallRecordings)
     ->daily()
+    ->onOneServer()
+    ->withoutOverlapping();
+
+Schedule::job(new ExpireStaleAiAssistantSessions)
+    ->everyFiveMinutes()
     ->onOneServer()
     ->withoutOverlapping();
 
