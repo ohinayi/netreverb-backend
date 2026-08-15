@@ -8,6 +8,7 @@ use App\Models\AiAssistant;
 use App\Models\AiAssistantField;
 use App\Models\AiAssistantSession;
 use App\Models\AiUsageRecord;
+use App\Services\Ai\AiAssistantPromptSynthesizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -96,7 +97,7 @@ class AiAssistantCallFlow
         $session->update(['transcript' => trim(($session->transcript ?? '')."\n".$field->key.': '.$transcript)]);
 
         if (trim($transcript) === '') {
-            $this->emitRedoOrSkip($xml, $condition, $session, $field, "Sorry, I didn't catch that.");
+            $this->emitRedoOrSkip($xml, $condition, $session, $field);
 
             return $this->respond($xml);
         }
@@ -104,13 +105,26 @@ class AiAssistantCallFlow
         $value = $this->extractFieldValue($session, $field, $transcript);
 
         if ($value === null || $value === '') {
-            $this->emitRedoOrSkip($xml, $condition, $session, $field, "Sorry, I didn't catch that.");
+            $this->emitRedoOrSkip($xml, $condition, $session, $field);
 
             return $this->respond($xml);
         }
 
         $session->update(['pending_value' => (string) $value]);
-        $this->appendSpeak($xml, $condition, "You said, for {$field->label}: {$value}. Press 1 to confirm, or 2 to try again.");
+        // Only the caller's actual captured value has to be spoken live
+        // (flite) - the surrounding "You said, for X:" / "Press 1 to
+        // confirm..." wrapper is fixed text, pre-generated in the
+        // assistant's own Piper voice like everything else, instead of the
+        // whole sentence falling back to flite just because part of it is
+        // dynamic.
+        $voice = $session->assistant->tts_voice ?: AiAssistantPromptSynthesizer::DEFAULT_VOICE;
+        $this->appendPlaybackOrSpeak($xml, $condition, $field->confirm_prefix_audio_path, "You said, for {$field->label}:");
+        $this->appendSpeak($xml, $condition, (string) $value);
+        $this->appendPlaybackOrSpeak(
+            $xml, $condition,
+            $this->sharedPromptIfExists(AiAssistantPromptSynthesizer::sharedPromptPath($voice, 'confirm-prompt')),
+            AiAssistantPromptSynthesizer::CONFIRM_PROMPT_TEXT,
+        );
         $this->appendReadDigit($xml, $condition, 'ai_confirm_digit', 8);
         $this->appendTransfer($xml, $condition, '${ai_confirm_digit}', self::CONFIRM_CONTEXT_PREFIX.$session->public_id);
 
@@ -147,7 +161,7 @@ class AiAssistantCallFlow
             return $this->respond($xml);
         }
 
-        $this->emitRedoOrSkip($xml, $condition, $session, $field, "Let's try that again.");
+        $this->emitRedoOrSkip($xml, $condition, $session, $field);
 
         return $this->respond($xml);
     }
@@ -175,7 +189,7 @@ class AiAssistantCallFlow
         $this->appendTransfer($xml, $condition, 'continue', self::ANSWER_CONTEXT_PREFIX.$session->public_id);
     }
 
-    private function emitRedoOrSkip(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field, string $apology): void
+    private function emitRedoOrSkip(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): void
     {
         $maxRetries = (int) config('telephony.ai_assistant.max_retries', 2);
         $retryCount = $session->retry_count + 1;
@@ -190,7 +204,12 @@ class AiAssistantCallFlow
         }
 
         $session->update(['retry_count' => $retryCount, 'pending_value' => null]);
-        $this->appendSpeak($xml, $condition, $apology);
+        $voice = $session->assistant->tts_voice ?: AiAssistantPromptSynthesizer::DEFAULT_VOICE;
+        $this->appendPlaybackOrSpeak(
+            $xml, $condition,
+            $this->sharedPromptIfExists(AiAssistantPromptSynthesizer::sharedPromptPath($voice, 'redo-prompt')),
+            AiAssistantPromptSynthesizer::REDO_PROMPT_TEXT,
+        );
         $this->emitQuestionAndRecord($xml, $condition, $session->fresh(), $field);
     }
 
@@ -266,7 +285,7 @@ class AiAssistantCallFlow
                         $field->key => [
                             'type' => $field->field_type === 'boolean' ? 'boolean' : 'string',
                             'nullable' => true,
-                            'description' => $field->question ?: $field->label,
+                            'description' => $this->fieldDescription($field),
                         ],
                     ],
                 ],
@@ -290,6 +309,25 @@ class AiAssistantCallFlow
 
             return null;
         }
+    }
+
+    /**
+     * Phone numbers are where transcription slips hurt the most - a single
+     * dropped or misheard digit produces a number that just doesn't work,
+     * silently. Telling the model explicitly to preserve every spoken digit
+     * (rather than "normalizing" toward a familiar-looking number) is a
+     * real, cheap improvement; it can't fix a digit Whisper never heard in
+     * the first place, though - that's a transcription accuracy problem,
+     * not an extraction one.
+     */
+    private function fieldDescription(AiAssistantField $field): string
+    {
+        $base = $field->question ?: $field->label;
+        if ($field->field_type === 'phone') {
+            return $base.' Preserve every digit exactly as spoken, in order - do not add, drop, or "correct" digits toward a number that looks more familiar.';
+        }
+
+        return $base;
     }
 
     /**
@@ -418,6 +456,17 @@ class AiAssistantCallFlow
         }
 
         $this->appendSpeak($xml, $condition, (string) $text);
+    }
+
+    /**
+     * The shared confirm/redo prompts aren't tracked by a DB column (they're
+     * computed deterministically from the voice, not owned by one
+     * assistant) - so unlike question_audio_path etc, existence has to be
+     * checked here rather than trusted.
+     */
+    private function sharedPromptIfExists(string $path): ?string
+    {
+        return Storage::disk('public')->exists($path) ? $path : null;
     }
 
     private function appendReadDigit(\DOMDocument $xml, \DOMElement $condition, string $variable, int $timeoutSeconds): void

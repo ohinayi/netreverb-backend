@@ -10,7 +10,7 @@ class AiAssistantField extends Model
 {
     use HasUlids;
 
-    protected $fillable = ['ai_assistant_id', 'key', 'label', 'field_type', 'question', 'question_audio_path', 'required', 'options', 'sort_order'];
+    protected $fillable = ['ai_assistant_id', 'key', 'label', 'field_type', 'question', 'question_audio_path', 'confirm_prefix_audio_path', 'required', 'options', 'sort_order'];
 
     protected $attributes = ['field_type' => 'text', 'required' => false, 'sort_order' => 0];
 
