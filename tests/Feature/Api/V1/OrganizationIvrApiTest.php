@@ -49,6 +49,23 @@ class OrganizationIvrApiTest extends TestCase
         $this->assertSame('We are open nine to five, Monday through Friday.', $options[1]['directive_text']);
     }
 
+    public function test_an_ivr_can_be_created_without_a_service_number_to_use_only_as_a_nested_submenu(): void
+    {
+        $organization = Organization::factory()->create();
+        $this->actingAsAdmin($organization);
+
+        $response = $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs", [
+            'name' => 'Dressing help',
+            'welcome_text' => 'Press 1 for shoes.',
+            'options' => [
+                ['digit' => '1', 'label' => 'Shoes', 'destination_type' => 'directive', 'directive_text' => 'Put your foot in the shoe.', 'sort_order' => 0],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('organization_ivrs', ['organization_id' => $organization->id, 'name' => 'Dressing help']);
+    }
+
     public function test_a_submenu_option_must_reference_an_existing_ivr_in_the_same_organization(): void
     {
         $organization = Organization::factory()->create();

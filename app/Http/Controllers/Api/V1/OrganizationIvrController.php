@@ -32,10 +32,14 @@ class OrganizationIvrController extends Controller
         $ivr->options()->createMany($data['options'] ?? []);
         $this->synthesizePrompt($ivr, $data['options'] ?? []);
         $this->synthesizeDirectives($ivr);
-        $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
-        $configuration = $service->configuration ?? [];
-        $configuration['ivr_public_id'] = $ivr->public_id;
-        $service->update(['configuration' => $configuration]);
+        // A submenu that only ever gets reached by nesting under another
+        // IVR's option has no service number of its own to dial into.
+        if (! empty($data['service_number_id'])) {
+            $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->firstOrFail();
+            $configuration = $service->configuration ?? [];
+            $configuration['ivr_public_id'] = $ivr->public_id;
+            $service->update(['configuration' => $configuration]);
+        }
         return response()->json(['data' => $ivr->load('options')], 201);
     }
 
@@ -76,7 +80,7 @@ class OrganizationIvrController extends Controller
     private function validated(Request $request, Organization $organization, bool $creating): array
     {
         $data = $request->validate([
-            'service_number_id' => [$creating ? 'required' : 'sometimes', 'string', Rule::exists('service_numbers', 'public_id')->where(fn ($query) => $query->where('organization_id', $organization->getKey()))],
+            'service_number_id' => ['sometimes', 'nullable', 'string', Rule::exists('service_numbers', 'public_id')->where(fn ($query) => $query->where('organization_id', $organization->getKey()))],
             'name' => ['required', 'string', 'max:120'], 'welcome_text' => ['nullable', 'string', 'max:1000'],
             'welcome_audio_path' => ['nullable', 'string', 'max:500'], 'max_retries' => ['nullable', 'integer', 'min:0', 'max:5'],
             'tts_voice' => ['nullable', 'string', Rule::in(array_keys(config('tts.piper.voices', [])))],
@@ -90,7 +94,7 @@ class OrganizationIvrController extends Controller
             'options.*.directive_text' => ['nullable', 'string', 'max:2000'],
             'options.*.enabled' => ['sometimes', 'boolean'],
         ]);
-        if ($creating) {
+        if (! empty($data['service_number_id'])) {
             $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->first();
             if (! $service || ! $service->enabled) {
                 throw ValidationException::withMessages(['service_number_id' => 'Select an active service number assigned to this organization.']);
