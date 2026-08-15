@@ -66,6 +66,99 @@ class OrganizationIvrApiTest extends TestCase
         $this->assertDatabaseHas('organization_ivrs', ['organization_id' => $organization->id, 'name' => 'Dressing help']);
     }
 
+    public function test_admin_can_build_a_nested_submenu_inline_without_creating_a_separate_ivr_first(): void
+    {
+        $organization = Organization::factory()->create();
+        $this->actingAsAdmin($organization);
+
+        $response = $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs", [
+            'name' => 'Main menu',
+            'welcome_text' => 'Welcome. Press 1 for dressing issues.',
+            'options' => [
+                [
+                    'digit' => '1', 'label' => 'Dressing issues', 'destination_type' => 'submenu', 'sort_order' => 0,
+                    'submenu' => [
+                        'welcome_text' => 'Press 1 for shoes.',
+                        'options' => [
+                            ['digit' => '1', 'label' => 'Shoes', 'destination_type' => 'directive', 'directive_text' => 'Put your foot in the shoe and tie the laces.', 'sort_order' => 0],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $this->assertDatabaseCount('organization_ivrs', 2);
+        $parentOption = $response->json('data.options.0');
+        $this->assertSame('submenu', $parentOption['destination_type']);
+        $this->assertNotEmpty($parentOption['destination']);
+        $child = OrganizationIvr::query()->where('public_id', $parentOption['destination'])->with('options')->firstOrFail();
+        $this->assertSame('Press 1 for shoes.', $child->welcome_text);
+        $this->assertSame('directive', $child->options->first()->destination_type);
+    }
+
+    public function test_editing_a_parent_ivr_upserts_its_inline_nested_submenu_in_place(): void
+    {
+        $organization = Organization::factory()->create();
+        $this->actingAsAdmin($organization);
+
+        $created = $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs", [
+            'name' => 'Main menu',
+            'options' => [
+                [
+                    'digit' => '1', 'label' => 'Dressing issues', 'destination_type' => 'submenu', 'sort_order' => 0,
+                    'submenu' => [
+                        'welcome_text' => 'Press 1 for shoes.',
+                        'options' => [
+                            ['digit' => '1', 'label' => 'Shoes', 'destination_type' => 'directive', 'directive_text' => 'Put your foot in the shoe.', 'sort_order' => 0],
+                        ],
+                    ],
+                ],
+            ],
+        ])->assertCreated();
+
+        $parentPublicId = $created->json('data.public_id');
+        $childPublicId = $created->json('data.options.0.destination');
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs/{$parentPublicId}", [
+            '_method' => 'PATCH',
+            'name' => 'Main menu',
+            'options' => [
+                [
+                    'digit' => '1', 'label' => 'Dressing issues', 'destination_type' => 'submenu', 'sort_order' => 0,
+                    'submenu' => [
+                        'public_id' => $childPublicId,
+                        'welcome_text' => 'Press 1 for shoes, updated.',
+                        'options' => [
+                            ['digit' => '1', 'label' => 'Shoes', 'destination_type' => 'directive', 'directive_text' => 'Put your foot in the shoe.', 'sort_order' => 0],
+                        ],
+                    ],
+                ],
+            ],
+        ])->assertOk();
+
+        $this->assertDatabaseCount('organization_ivrs', 2);
+        $this->assertDatabaseHas('organization_ivrs', ['public_id' => $childPublicId, 'welcome_text' => 'Press 1 for shoes, updated.']);
+    }
+
+    public function test_a_submenu_cannot_nest_itself(): void
+    {
+        $organization = Organization::factory()->create();
+        $this->actingAsAdmin($organization);
+        $ivr = OrganizationIvr::create(['organization_id' => $organization->id, 'name' => 'Loop', 'enabled' => true]);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ivrs/{$ivr->public_id}", [
+            '_method' => 'PATCH',
+            'name' => 'Loop',
+            'options' => [
+                [
+                    'digit' => '1', 'label' => 'Back to start', 'destination_type' => 'submenu', 'sort_order' => 0,
+                    'submenu' => ['public_id' => $ivr->public_id, 'options' => []],
+                ],
+            ],
+        ])->assertUnprocessable()->assertJsonValidationErrors(['options.0.submenu']);
+    }
+
     public function test_a_submenu_option_must_reference_an_existing_ivr_in_the_same_organization(): void
     {
         $organization = Organization::factory()->create();

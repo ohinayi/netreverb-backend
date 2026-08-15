@@ -13,6 +13,8 @@ use Illuminate\Validation\ValidationException;
 
 class OrganizationIvrController extends Controller
 {
+    private const MAX_NESTING_DEPTH = 5;
+
     public function index(Organization $organization)
     {
         $this->authorizeOrganization($organization);
@@ -22,16 +24,12 @@ class OrganizationIvrController extends Controller
     public function store(Request $request, Organization $organization)
     {
         $this->authorizeOrganization($organization, true);
-        $data = $this->validated($request, $organization, true);
+        $data = $this->validated($request, $organization);
         if ($request->hasFile('welcome_audio')) {
             $data['welcome_audio_path'] = $request->file('welcome_audio')->store('ivr-welcome/'.$organization->public_id, 'public');
         }
-        // service_number_id selects the inbound route; it is stored on the
-        // service configuration below, not as a column on organization_ivrs.
-        $ivr = $organization->ivrs()->create(collect($data)->except(['options', 'service_number_id'])->all());
-        $ivr->options()->createMany($data['options'] ?? []);
-        $this->synthesizePrompt($ivr, $data['options'] ?? []);
-        $this->synthesizeDirectives($ivr);
+        $options = $this->normalizeOptions($request->input('options', []), $organization, 0);
+        $ivr = $this->persistTree($organization, $data, $options, null);
         // A submenu that only ever gets reached by nesting under another
         // IVR's option has no service number of its own to dial into.
         if (! empty($data['service_number_id'])) {
@@ -47,19 +45,18 @@ class OrganizationIvrController extends Controller
     {
         $this->authorizeOrganization($organization, true);
         abort_unless((int) $ivr->organization_id === (int) $organization->getKey(), 404);
-        $data = $this->validated($request, $organization, false);
+        $data = $this->validated($request, $organization);
         if ($request->hasFile('welcome_audio')) {
             if ($ivr->welcome_audio_path) Storage::disk('public')->delete($ivr->welcome_audio_path);
             $data['welcome_audio_path'] = $request->file('welcome_audio')->store('ivr-welcome/'.$organization->public_id, 'public');
         }
-        $ivr->update(collect($data)->except(['options', 'service_number_id'])->all());
-        if (array_key_exists('options', $data)) {
-            $ivr->options()->delete();
-            $ivr->options()->createMany($data['options'] ?? []);
+        if ($request->has('options')) {
+            $options = $this->normalizeOptions($request->input('options', []), $organization, 0, $ivr->public_id);
+            $this->persistTree($organization, $data, $options, $ivr);
+        } else {
+            $ivr->update(collect($data)->except('service_number_id')->all());
         }
-        $this->synthesizePrompt($ivr, $data['options'] ?? $ivr->options()->get()->toArray());
-        $this->synthesizeDirectives($ivr);
-        return response()->json(['data' => $ivr->load('options')]);
+        return response()->json(['data' => $ivr->fresh('options')]);
     }
 
     public function destroy(Organization $organization, OrganizationIvr $ivr)
@@ -77,7 +74,7 @@ class OrganizationIvrController extends Controller
         return response()->json(['data' => $ivr->load('options')]);
     }
 
-    private function validated(Request $request, Organization $organization, bool $creating): array
+    private function validated(Request $request, Organization $organization): array
     {
         $data = $request->validate([
             'service_number_id' => ['sometimes', 'nullable', 'string', Rule::exists('service_numbers', 'public_id')->where(fn ($query) => $query->where('organization_id', $organization->getKey()))],
@@ -87,12 +84,6 @@ class OrganizationIvrController extends Controller
             'tts_speed' => ['nullable', 'numeric', 'min:0.5', 'max:2.0'],
             'welcome_audio' => ['nullable', 'file', 'mimes:wav,mp3,ogg,m4a', 'max:10240'],
             'timeout_seconds' => ['nullable', 'integer', 'min:1', 'max:30'], 'enabled' => ['sometimes', 'boolean'],
-            'options' => ['sometimes', 'array', 'max:10'], 'options.*.digit' => ['required', 'regex:/^[0-9*#]$/'],
-            'options.*.label' => ['required', 'string', 'max:120'],
-            'options.*.destination_type' => ['required', Rule::in(['extension', 'queue', 'conference', 'external', 'announcement', 'hangup', 'submenu', 'directive'])],
-            'options.*.destination' => ['nullable', 'string', 'max:255'], 'options.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:99'],
-            'options.*.directive_text' => ['nullable', 'string', 'max:2000'],
-            'options.*.enabled' => ['sometimes', 'boolean'],
         ]);
         if (! empty($data['service_number_id'])) {
             $service = $organization->serviceNumbers()->where('public_id', $data['service_number_id'])->first();
@@ -100,18 +91,155 @@ class OrganizationIvrController extends Controller
                 throw ValidationException::withMessages(['service_number_id' => 'Select an active service number assigned to this organization.']);
             }
         }
-        foreach ($data['options'] ?? [] as $index => $option) {
-            if ($option['destination_type'] === 'submenu') {
-                $exists = $organization->ivrs()->where('public_id', $option['destination'] ?? null)->exists();
-                if (! $exists) {
-                    throw ValidationException::withMessages(["options.{$index}.destination" => 'Select an existing IVR menu in this organization to nest as a submenu.']);
+        return $data;
+    }
+
+    /**
+     * Recursively validates and normalizes an options payload. A 'submenu'
+     * option may either reference an existing standalone IVR (via
+     * 'destination', the original flow) or carry an inline-built nested
+     * menu (via a 'submenu' object with its own 'options') that the
+     * builder UI lets an admin construct in the same form instead of
+     * creating a separate IVR first. Laravel's array validation rules
+     * can't express this unbounded recursive shape, so it's walked by
+     * hand instead.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeOptions(mixed $rawOptions, Organization $organization, int $depth, ?string $ownIvrPublicId = null): array
+    {
+        if (! is_array($rawOptions)) $rawOptions = [];
+        if (count($rawOptions) > 10) {
+            throw ValidationException::withMessages(['options' => 'A menu can have at most 10 options.']);
+        }
+        if ($depth >= self::MAX_NESTING_DEPTH) {
+            throw ValidationException::withMessages(['options' => 'Menus can only be nested '.self::MAX_NESTING_DEPTH.' levels deep.']);
+        }
+
+        $seenDigits = [];
+        $normalized = [];
+        foreach (array_values($rawOptions) as $index => $raw) {
+            $path = "options.{$index}";
+            $raw = is_array($raw) ? $raw : [];
+
+            $digit = (string) ($raw['digit'] ?? '');
+            if (! preg_match('/^[0-9*#]$/', $digit)) {
+                throw ValidationException::withMessages(["{$path}.digit" => 'Enter a single digit (0-9, * or #).']);
+            }
+            if (isset($seenDigits[$digit])) {
+                throw ValidationException::withMessages(["{$path}.digit" => 'Each key press can only be used once in this menu.']);
+            }
+            $seenDigits[$digit] = true;
+
+            $label = trim((string) ($raw['label'] ?? ''));
+            if ($label === '' || mb_strlen($label) > 120) {
+                throw ValidationException::withMessages(["{$path}.label" => 'Enter a label up to 120 characters.']);
+            }
+
+            $type = (string) ($raw['destination_type'] ?? '');
+            if (! in_array($type, ['extension', 'queue', 'conference', 'external', 'announcement', 'hangup', 'submenu', 'directive'], true)) {
+                throw ValidationException::withMessages(["{$path}.destination_type" => 'Select a valid option type.']);
+            }
+
+            $option = [
+                'digit' => $digit, 'label' => $label, 'destination_type' => $type,
+                'destination' => isset($raw['destination']) && $raw['destination'] !== '' ? (string) $raw['destination'] : null,
+                'directive_text' => isset($raw['directive_text']) ? (string) $raw['directive_text'] : null,
+                'enabled' => array_key_exists('enabled', $raw) ? (bool) $raw['enabled'] : true,
+                'sort_order' => $index,
+            ];
+
+            if ($type === 'directive' && trim((string) $option['directive_text']) === '') {
+                throw ValidationException::withMessages(["{$path}.directive_text" => 'Enter the message to play for this directive.']);
+            }
+
+            if ($type === 'submenu') {
+                $nested = $raw['submenu'] ?? null;
+                if (is_array($nested)) {
+                    $nestedPublicId = isset($nested['public_id']) && $nested['public_id'] !== '' ? (string) $nested['public_id'] : null;
+                    // A submenu can't nest itself directly - the runtime
+                    // dialplan avoids eager recursion so this can't crash a
+                    // call, but it would still be a confusing dead end for
+                    // whoever built it, so reject it up front.
+                    if ($ownIvrPublicId && $nestedPublicId === $ownIvrPublicId) {
+                        throw ValidationException::withMessages(["{$path}.submenu" => 'A menu cannot nest itself.']);
+                    }
+                    $welcomeText = isset($nested['welcome_text']) ? (string) $nested['welcome_text'] : null;
+                    if ($welcomeText !== null && mb_strlen($welcomeText) > 1000) {
+                        throw ValidationException::withMessages(["{$path}.submenu.welcome_text" => 'Keep the welcome text under 1000 characters.']);
+                    }
+                    $childOptions = $this->normalizeOptions($nested['options'] ?? [], $organization, $depth + 1, $nestedPublicId);
+                    $option['submenu'] = [
+                        'public_id' => $nestedPublicId,
+                        'name' => trim((string) ($nested['name'] ?? '')) !== '' ? trim((string) $nested['name']) : ($label.' menu'),
+                        'welcome_text' => $welcomeText,
+                        'tts_voice' => $nested['tts_voice'] ?? null,
+                        'tts_speed' => isset($nested['tts_speed']) ? max(0.5, min(2.0, (float) $nested['tts_speed'])) : null,
+                        'timeout_seconds' => isset($nested['timeout_seconds']) ? max(1, min(30, (int) $nested['timeout_seconds'])) : 5,
+                        'max_retries' => isset($nested['max_retries']) ? max(0, min(5, (int) $nested['max_retries'])) : 2,
+                        'enabled' => array_key_exists('enabled', $nested) ? (bool) $nested['enabled'] : true,
+                        'options' => $childOptions,
+                    ];
+                } elseif (! empty($option['destination'])) {
+                    $exists = $organization->ivrs()->where('public_id', $option['destination'])->exists();
+                    if (! $exists) {
+                        throw ValidationException::withMessages(["{$path}.destination" => 'Select an existing IVR menu in this organization to nest as a submenu.']);
+                    }
+                } else {
+                    throw ValidationException::withMessages(["{$path}.destination" => 'Build a nested submenu or select an existing IVR menu.']);
                 }
             }
-            if ($option['destination_type'] === 'directive' && ! trim($option['directive_text'] ?? '')) {
-                throw ValidationException::withMessages(["options.{$index}.directive_text" => 'Enter the message to play for this directive.']);
-            }
+
+            $normalized[] = $option;
         }
-        return $data;
+
+        return $normalized;
+    }
+
+    /**
+     * Recursively creates or updates an IVR and its options. A submenu
+     * option carrying an inline-built 'submenu' definition has its child
+     * IVR persisted first (matched to an existing row by public_id when
+     * editing, created otherwise) so the parent option can point its
+     * 'destination' at the child's public_id, exactly like a submenu that
+     * references a pre-existing standalone IVR.
+     *
+     * @param  array<int, array<string, mixed>>  $options
+     */
+    private function persistTree(Organization $organization, array $attrs, array $options, ?OrganizationIvr $existing): OrganizationIvr
+    {
+        $ivrAttrs = collect($attrs)->only(['name', 'welcome_text', 'welcome_audio_path', 'tts_voice', 'tts_speed', 'max_retries', 'timeout_seconds', 'enabled'])->all();
+        $ivr = $existing ? tap($existing)->update($ivrAttrs) : $organization->ivrs()->create($ivrAttrs);
+        // A freshly created row may have picked up column defaults (e.g.
+        // tts_voice) that this in-memory instance never had attributes
+        // set for - refresh so a nested submenu inheriting "the parent's
+        // voice" below sees the real value instead of null.
+        $ivr->refresh();
+
+        foreach ($options as &$option) {
+            if ($option['destination_type'] === 'submenu' && isset($option['submenu'])) {
+                $childAttrs = $option['submenu'];
+                $childExisting = ! empty($childAttrs['public_id'])
+                    ? $organization->ivrs()->where('public_id', $childAttrs['public_id'])->first()
+                    : null;
+                // A nested menu built inline without its own voice/speed
+                // picks up the parent's, so an admin building a whole tree
+                // in one sitting only has to choose it once.
+                $childAttrs['tts_voice'] ??= $ivr->tts_voice;
+                $childAttrs['tts_speed'] ??= $ivr->tts_speed;
+                $child = $this->persistTree($organization, $childAttrs, $childAttrs['options'], $childExisting);
+                $option['destination'] = $child->public_id;
+            }
+            unset($option['submenu']);
+        }
+        unset($option);
+
+        $ivr->options()->delete();
+        $ivr->options()->createMany($options);
+        $this->synthesizePrompt($ivr, $options);
+        $this->synthesizeDirectives($ivr);
+
+        return $ivr;
     }
 
     private function authorizeOrganization(Organization $organization, bool $manage = false): void
