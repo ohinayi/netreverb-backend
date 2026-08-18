@@ -2,7 +2,9 @@
 
 namespace App\Services\Telephony;
 
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 class FreeSwitchEventSocketClient
 {
@@ -93,6 +95,86 @@ class FreeSwitchEventSocketClient
             }
 
             return $events;
+        } finally {
+            fclose($socket);
+        }
+    }
+
+    /**
+     * Holds a single event-socket connection open indefinitely instead of
+     * reconnecting on a fixed poll interval, and invokes $onMessage for each
+     * event as it arrives. Reconnects automatically (with a short backoff)
+     * only when the connection actually drops or a protocol error occurs.
+     *
+     * @param  array<int, string>  $eventNames
+     * @param  callable(array{headers: array<string, string>, body: string, reply_text: string}): void  $onMessage
+     */
+    public function listenForever(array $eventNames, callable $onMessage): never
+    {
+        $this->assertPasswordConfigured();
+
+        while (true) {
+            try {
+                $this->runPersistentListenSession($eventNames, $onMessage);
+            } catch (Throwable $exception) {
+                Log::error('FreeSWITCH persistent event listener disconnected, reconnecting.', [
+                    'error' => $exception->getMessage(),
+                ]);
+                sleep(2);
+            }
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $eventNames
+     * @param  callable(array{headers: array<string, string>, body: string, reply_text: string}): void  $onMessage
+     */
+    private function runPersistentListenSession(array $eventNames, callable $onMessage): void
+    {
+        $socket = $this->openSocket(3600);
+
+        try {
+            $this->consumeBanner($socket);
+            $this->send($socket, 'auth '.$this->password);
+            $authResponse = $this->readMessage($socket);
+
+            if (! str_contains($authResponse['reply_text'] ?? '', '+OK')) {
+                throw new RuntimeException('FreeSWITCH event socket authentication failed.');
+            }
+
+            $this->send($socket, 'event plain '.implode(' ', $eventNames));
+            $subscribeResponse = $this->readMessage($socket);
+
+            if (! str_contains($subscribeResponse['reply_text'] ?? '', '+OK')) {
+                throw new RuntimeException('FreeSWITCH event socket subscription failed.');
+            }
+
+            while (true) {
+                $read = [$socket];
+                $write = [];
+                $except = [];
+
+                // The 30s window is just a liveness check (feof) during idle
+                // periods, not a reconnect interval - the connection itself
+                // stays open across iterations.
+                $ready = @stream_select($read, $write, $except, 30, 0);
+
+                if ($ready === false || feof($socket)) {
+                    throw new RuntimeException('FreeSWITCH event socket connection was lost.');
+                }
+
+                if ($ready === 0) {
+                    continue;
+                }
+
+                $message = $this->readMessage($socket);
+
+                if ($message['headers'] === [] && $message['body'] === '' && $message['reply_text'] === '') {
+                    continue;
+                }
+
+                $onMessage($message);
+            }
         } finally {
             fclose($socket);
         }

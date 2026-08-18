@@ -47,6 +47,64 @@ class FreeSwitchCallUuidSynchronizer
         return $matchedCount;
     }
 
+    /**
+     * Keeps a single FreeSWITCH event-socket connection open and processes
+     * channel events as they arrive, instead of reconnecting on a fixed
+     * poll interval. Never returns under normal operation.
+     */
+    public function watchForever(): never
+    {
+        $recentlyHandled = [];
+
+        $this->client->listenForever(
+            ['CHANNEL_CREATE', 'CHANNEL_ANSWER', 'CHANNEL_HANGUP_COMPLETE'],
+            function (array $message) use (&$recentlyHandled): void {
+                if (! is_array($message)) {
+                    return;
+                }
+
+                $event = $this->parseEventMessage($message);
+                $eventName = $this->channelValue($event, ['event-name']);
+
+                if ($eventName === null
+                    || ! in_array($eventName, ['CHANNEL_CREATE', 'CHANNEL_ANSWER', 'CHANNEL_HANGUP_COMPLETE'], true)
+                ) {
+                    return;
+                }
+
+                $uuid = $this->channelValue($event, ['uuid', 'Unique-ID', 'unique_id']);
+
+                if ($uuid !== null && isset($recentlyHandled[$uuid])) {
+                    return;
+                }
+
+                Log::withContext([
+                    'sync_run_id' => (string) Str::ulid(),
+                    'source' => 'telephony:watch-freeswitch-call-uuids-persistent',
+                ]);
+
+                $matched = $this->processChannels([$event], 'event stream (persistent)');
+
+                // Only cache once a call log was actually found for this
+                // channel - CHANNEL_CREATE can fire before the app has
+                // written the call log row yet, and that event must not
+                // block a later CHANNEL_ANSWER/HANGUP_COMPLETE retry for the
+                // same UUID from succeeding.
+                if ($uuid !== null && $matched > 0) {
+                    $recentlyHandled[$uuid] = time();
+
+                    // Bound memory on a long-running connection - a channel's
+                    // events all arrive within seconds of each other, so a
+                    // 5-minute window is far more than needed to dedupe them.
+                    if (count($recentlyHandled) > 2000) {
+                        $cutoff = time() - 300;
+                        $recentlyHandled = array_filter($recentlyHandled, fn (int $seenAt): bool => $seenAt >= $cutoff);
+                    }
+                }
+            },
+        );
+    }
+
     public function syncFromEvents(int $listenSeconds = 5): int
     {
         $syncRunId = (string) Str::ulid();

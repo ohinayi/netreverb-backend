@@ -8,7 +8,7 @@ use Throwable;
 
 class SyncFreeSwitchCallUuids extends Command
 {
-    protected $signature = 'telephony:sync-freeswitch-call-uuids {--watch : Keep listening for FreeSWITCH events instead of running once} {--listen-seconds=1 : Event listen window in seconds}';
+    protected $signature = 'telephony:sync-freeswitch-call-uuids {--watch : Keep listening for FreeSWITCH events instead of running once} {--listen-seconds=1 : Event listen window in seconds (legacy --poll mode only)} {--poll : Use the legacy reconnect-every-window polling loop instead of a persistent connection}';
 
     protected $description = 'Sync active FreeSWITCH channel UUIDs into call logs.';
 
@@ -35,22 +35,28 @@ class SyncFreeSwitchCallUuids extends Command
 
     private function watch(FreeSwitchCallUuidSynchronizer $synchronizer, int $listenSeconds): int
     {
-        $this->components->info(sprintf(
-            'Watching FreeSWITCH events in %d second window(s). Press Ctrl+C to stop.',
-            $listenSeconds,
-        ));
+        if ($this->option('poll')) {
+            $this->components->info(sprintf(
+                'Watching FreeSWITCH events in %d second poll window(s) (legacy mode). Press Ctrl+C to stop.',
+                $listenSeconds,
+            ));
 
-        while (true) {
-            try {
-                $matched = $synchronizer->syncFromEvents($listenSeconds);
+            while (true) {
+                try {
+                    $matched = $synchronizer->syncFromEvents($listenSeconds);
 
-                if ($matched > 0) {
-                    $this->components->info(sprintf('Synced %d FreeSWITCH call(s).', $matched));
+                    if ($matched > 0) {
+                        $this->components->info(sprintf('Synced %d FreeSWITCH call(s).', $matched));
+                    }
+                } catch (Throwable $exception) {
+                    $this->error($exception->getMessage());
+                    sleep(1);
                 }
-            } catch (Throwable $exception) {
-                $this->error($exception->getMessage());
-                sleep(1);
             }
         }
+
+        $this->components->info('Watching FreeSWITCH events on a persistent connection. Press Ctrl+C to stop.');
+
+        $synchronizer->watchForever();
     }
 }

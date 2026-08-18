@@ -239,6 +239,131 @@ class SyncFreeSwitchCallUuidsTest extends TestCase
         $this->assertNull($callLog->recording_status);
     }
 
+    public function test_watch_forever_processes_persistent_events_and_dedupes_by_uuid(): void
+    {
+        $organization = Organization::factory()->create();
+        $callLog = CallLog::factory()->for($organization)->create([
+            'caller_number' => '1001',
+            'callee_number' => '101',
+            'status' => CallStatus::Ringing,
+            'freeswitch_uuid' => null,
+        ]);
+
+        $client = Mockery::mock(FreeSwitchEventSocketClient::class);
+        $client->shouldReceive('listenForever')
+            ->once()
+            ->with(Mockery::on(function (array $eventNames): bool {
+                sort($eventNames);
+
+                return $eventNames === [
+                    'CHANNEL_ANSWER',
+                    'CHANNEL_CREATE',
+                    'CHANNEL_HANGUP_COMPLETE',
+                ];
+            }), Mockery::type('callable'))
+            ->andReturnUsing(function (array $eventNames, callable $onMessage): never {
+                $onMessage([
+                    'headers' => [],
+                    'body' => implode("\n", [
+                        'Event-Name: CHANNEL_CREATE',
+                        'Unique-ID: fs-uuid-persistent',
+                        'Caller-Caller-ID-Number: 1001',
+                        'Caller-Destination-Number: vb-101',
+                    ]),
+                    'reply_text' => '',
+                ]);
+
+                // Same channel's HANGUP_COMPLETE arriving right after - must
+                // be deduped rather than re-queried (the first event already
+                // cleared the row's null freeswitch_uuid, so a second lookup
+                // would otherwise log a spurious "no call log matched").
+                $onMessage([
+                    'headers' => [],
+                    'body' => implode("\n", [
+                        'Event-Name: CHANNEL_HANGUP_COMPLETE',
+                        'Unique-ID: fs-uuid-persistent',
+                        'Caller-Caller-ID-Number: 1001',
+                        'Caller-Destination-Number: vb-101',
+                    ]),
+                    'reply_text' => '',
+                ]);
+
+                throw new \RuntimeException('test-stop');
+            });
+
+        $synchronizer = new FreeSwitchCallUuidSynchronizer($client);
+
+        try {
+            $synchronizer->watchForever();
+            $this->fail('Expected watchForever() to propagate the connection failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('test-stop', $exception->getMessage());
+        }
+
+        $callLog->refresh();
+
+        $this->assertSame('fs-uuid-persistent', $callLog->freeswitch_uuid);
+        $this->assertSame(CallStatus::InProgress, $callLog->status);
+    }
+
+    public function test_watch_forever_retries_a_channel_whose_first_event_arrived_before_the_call_log_existed(): void
+    {
+        $client = Mockery::mock(FreeSwitchEventSocketClient::class);
+        $client->shouldReceive('listenForever')
+            ->once()
+            ->andReturnUsing(function (array $eventNames, callable $onMessage): never {
+                // CHANNEL_CREATE fires before the app has written the call
+                // log row yet - this event must not be cached as "handled",
+                // or the later CHANNEL_ANSWER below would be skipped too.
+                $onMessage([
+                    'headers' => [],
+                    'body' => implode("\n", [
+                        'Event-Name: CHANNEL_CREATE',
+                        'Unique-ID: fs-uuid-race',
+                        'Caller-Caller-ID-Number: 1001',
+                        'Caller-Destination-Number: vb-101',
+                    ]),
+                    'reply_text' => '',
+                ]);
+
+                // The call log gets created here, between the two events -
+                // simulates the real race observed against a live server.
+                CallLog::factory()->for(Organization::factory()->create())->create([
+                    'caller_number' => '1001',
+                    'callee_number' => '101',
+                    'status' => CallStatus::Ringing,
+                    'freeswitch_uuid' => null,
+                ]);
+
+                $onMessage([
+                    'headers' => [],
+                    'body' => implode("\n", [
+                        'Event-Name: CHANNEL_ANSWER',
+                        'Unique-ID: fs-uuid-race',
+                        'Caller-Caller-ID-Number: 1001',
+                        'Caller-Destination-Number: vb-101',
+                    ]),
+                    'reply_text' => '',
+                ]);
+
+                throw new \RuntimeException('test-stop');
+            });
+
+        $synchronizer = new FreeSwitchCallUuidSynchronizer($client);
+
+        try {
+            $synchronizer->watchForever();
+            $this->fail('Expected watchForever() to propagate the connection failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('test-stop', $exception->getMessage());
+        }
+
+        $callLog = CallLog::where('caller_number', '1001')->where('callee_number', '101')->sole();
+
+        $this->assertSame('fs-uuid-race', $callLog->freeswitch_uuid);
+        $this->assertSame(CallStatus::InProgress, $callLog->status);
+    }
+
     public function test_it_passes_the_configured_listen_seconds_to_sync_once(): void
     {
         $this->app->instance(
