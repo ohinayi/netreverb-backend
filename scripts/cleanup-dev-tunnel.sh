@@ -8,7 +8,7 @@ ssh -T \
   -o ConnectTimeout=10 \
   deploy@sip.classyra.com.ng \
   'set -u
-   ss -Hlnpt 2>/dev/null | awk "/127\\.0\\.0\\.1:8001/ {print}" |
+   ss -Hlnpt 2>/dev/null | awk "/127\\.0\\.0\\.1:'"${NETREVERB_TUNNEL_REMOTE_PORT:-8001}"'/ {print}" |
    sed -n "s/.*pid=\\([0-9][0-9]*\\).*/\\1/p" |
    while read -r pid; do
      [ -n "$pid" ] || continue
