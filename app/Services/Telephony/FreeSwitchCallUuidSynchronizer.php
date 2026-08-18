@@ -184,6 +184,7 @@ class FreeSwitchCallUuidSynchronizer
     private function processChannels(array $channels, string $source): int
     {
         $matchedCount = 0;
+        $seenUuids = [];
 
         foreach ($channels as $index => $channel) {
             if (! is_array($channel)) {
@@ -230,6 +231,12 @@ class FreeSwitchCallUuidSynchronizer
 
                 continue;
             }
+
+            if (isset($seenUuids[$uuid])) {
+                continue;
+            }
+
+            $seenUuids[$uuid] = true;
 
             Log::debug('Inspecting FreeSWITCH channel for call-log match.', [
                 'source' => $source,
