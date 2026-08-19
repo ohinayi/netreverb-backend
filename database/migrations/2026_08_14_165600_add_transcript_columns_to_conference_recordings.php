@@ -66,7 +66,10 @@ return new class extends Migration
                 $table->text('text');
                 $table->timestamps();
 
-                $table->index(['conference_recording_track_id', 'segment_index']);
+                // Same over-length identifier problem as the FK below - MySQL's
+                // auto-generated index name for this column pair exceeds its
+                // own 64-char limit.
+                $table->index(['conference_recording_track_id', 'segment_index'], 'crts_track_segment_idx');
             });
         }
 
