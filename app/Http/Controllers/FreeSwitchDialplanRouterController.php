@@ -17,8 +17,16 @@ class FreeSwitchDialplanRouterController extends Controller
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
         $localExtensions = config('telephony.freeswitch.xml_curl_local_test_extensions', []);
         $localTunnelUrl = (string) config('telephony.freeswitch.xml_curl_local_tunnel_url');
+        $portOverrides = config('telephony.freeswitch.xml_curl_local_test_extension_ports', []);
 
         $isLocalTestCaller = $callerExtension !== '' && in_array($callerExtension, $localExtensions, true);
+
+        // Each developer's own extension can tunnel to their own port, so two
+        // people can run `composer dev` at the same time without one of them
+        // stealing the other's reverse tunnel.
+        if ($isLocalTestCaller && isset($portOverrides[$callerExtension]) && $localTunnelUrl !== '') {
+            $localTunnelUrl = (string) preg_replace('/:\d+\b/', ':'.$portOverrides[$callerExtension], $localTunnelUrl, 1);
+        }
 
         // Production already knows this destination (a real, enabled service
         // number) - always resolve it there, even for a local-test caller.

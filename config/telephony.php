@@ -114,6 +114,25 @@ return [
             explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSIONS', '')),
         ))),
         'xml_curl_local_tunnel_url' => rtrim((string) env('FREESWITCH_XML_CURL_LOCAL_TUNNEL_URL', ''), '/'),
+        // Two developers can run `composer dev` at once, each on their own
+        // reverse-tunnel port. Format: "extension:port,extension:port". An
+        // extension not listed here uses the port already baked into
+        // xml_curl_local_tunnel_url.
+        'xml_curl_local_test_extension_ports' => array_reduce(
+            array_filter(array_map(
+                'trim',
+                explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSION_PORTS', '')),
+            )),
+            function (array $ports, string $pair): array {
+                [$extension, $port] = array_pad(explode(':', $pair, 2), 2, null);
+                if ($extension !== null && $port !== null && trim($extension) !== '' && trim($port) !== '') {
+                    $ports[trim($extension)] = (int) trim($port);
+                }
+
+                return $ports;
+            },
+            [],
+        ),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
         // Browser extensions are routed by the public dialplan.  Sending a
         // blind transfer to `default` hits its catch-all/sleep rule instead

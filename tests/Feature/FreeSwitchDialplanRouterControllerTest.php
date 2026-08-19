@@ -79,6 +79,26 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_a_local_test_caller_with_a_port_override_tunnels_to_their_own_port(): void
+    {
+        $this->configureRouter();
+        Config::set('telephony.freeswitch.xml_curl_local_test_extension_ports', ['100005' => 8002]);
+
+        Http::fake([
+            'http://127.0.0.1:8002/*' => Http::response('<local-only-xml/>', 200, ['Content-Type' => 'text/xml']),
+            'http://127.0.0.1:8001/*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
+        ]);
+
+        $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
+            'destination_number' => '23444444',
+            'Caller-Caller-ID-Number' => '100005',
+            'context' => 'public',
+        ]);
+
+        $response->assertOk();
+        Http::assertSent(fn ($request) => str_starts_with((string) $request->url(), 'http://127.0.0.1:8002/'));
+    }
+
     public function test_falls_through_to_production_when_the_local_tunnel_is_unreachable(): void
     {
         $this->configureRouter();
