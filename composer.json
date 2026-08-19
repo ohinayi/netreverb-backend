@@ -51,7 +51,7 @@
         "dev": [
             "Composer\\Config::disableProcessTimeout",
             "@dev:cleanup-tunnel",
-            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"sh scripts/dev-tunnel.sh\" \"php artisan queue:work --queue=telephony,recordings,ai,outbound,payments,default --tries=5 --timeout=300 --sleep=1\" \"php artisan schedule:work\" \"php artisan telephony:sync-freeswitch-call-uuids --watch\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,uuid-sync,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#facc15,#c4b5fd,#86efac,#fb7185,#fdba74\" \"php artisan serve --host=0.0.0.0 --port=8000\" \"sh scripts/dev-tunnel.sh\" \"php artisan queue:work --queue=telephony,recordings,ai,outbound,payments,default --tries=5 --timeout=300 --sleep=1\" \"php artisan schedule:work\" \"sh -c 'sleep 5; php artisan telephony:sync-freeswitch-call-uuids --watch'\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,tunnel,queue,scheduler,uuid-sync,logs,vite --kill-others"
         ],
         "dev:cleanup-tunnel": "sh scripts/cleanup-dev-tunnel.sh",
         "test": [
