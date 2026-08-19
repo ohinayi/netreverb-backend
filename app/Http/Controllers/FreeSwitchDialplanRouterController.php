@@ -15,17 +15,20 @@ class FreeSwitchDialplanRouterController extends Controller
             ?: $request->input('variable_sip_from_user')
             ?: $request->input('Caller-Username'));
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
-        $localExtensions = config('telephony.freeswitch.xml_curl_local_test_extensions', []);
-        $localTunnelUrl = (string) config('telephony.freeswitch.xml_curl_local_tunnel_url');
-        $portOverrides = config('telephony.freeswitch.xml_curl_local_test_extension_ports', []);
+        $baseTunnelUrl = (string) config('telephony.freeswitch.xml_curl_local_tunnel_url');
 
-        $isLocalTestCaller = $callerExtension !== '' && in_array($callerExtension, $localExtensions, true);
-
-        // Each developer's own extension can tunnel to their own port, so two
-        // people can run `composer dev` at the same time without one of them
-        // stealing the other's reverse tunnel.
-        if ($isLocalTestCaller && isset($portOverrides[$callerExtension]) && $localTunnelUrl !== '') {
-            $localTunnelUrl = (string) preg_replace('/:\d+\b/', ':'.$portOverrides[$callerExtension], $localTunnelUrl, 1);
+        // Each developer owns a distinct extension-number prefix (e.g. one
+        // dev's local extensions all start with 900, another's with 100),
+        // routed to that dev's own reverse-tunnel port. New local extensions
+        // just need to fall under an existing prefix - no per-extension
+        // config edit required.
+        $prefixPorts = config('telephony.freeswitch.xml_curl_local_test_extension_prefix_ports', []);
+        $port = null;
+        foreach ($prefixPorts as $prefix => $prefixPort) {
+            if ($callerExtension !== '' && str_starts_with($callerExtension, (string) $prefix)) {
+                $port = $prefixPort;
+                break;
+            }
         }
 
         // Production already knows this destination (a real, enabled service
@@ -42,7 +45,9 @@ class FreeSwitchDialplanRouterController extends Controller
             ->whereHas('dialableNumber', fn ($query) => $query->where('number', $number))
             ->exists();
 
-        if ($isLocalTestCaller && $localTunnelUrl !== '' && ! $prodHasServiceNumber) {
+        if ($port !== null && $baseTunnelUrl !== '' && ! $prodHasServiceNumber) {
+            $localTunnelUrl = (string) preg_replace('/:\d+\b/', ':'.$port, $baseTunnelUrl, 1);
+
             try {
                 $response = Http::asForm()
                     ->timeout(10)

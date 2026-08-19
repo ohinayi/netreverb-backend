@@ -105,34 +105,31 @@ return [
             'trim',
             explode(',', (string) env('FREESWITCH_XML_CURL_ALLOWED_IPS', '127.0.0.1,::1')),
         ))),
-        // The production XML-cURL router can send selected development
-        // extensions through the reverse SSH tunnel while every other call
+        // The production XML-cURL router can send calls from local-test
+        // extensions through a reverse SSH tunnel while every other call
         // continues to use production data. This keeps one permanent
         // FreeSWITCH XML-CURL URL for both environments.
-        'xml_curl_local_test_extensions' => array_values(array_filter(array_map(
-            'trim',
-            explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSIONS', '')),
-        ))),
-        'xml_curl_local_tunnel_url' => rtrim((string) env('FREESWITCH_XML_CURL_LOCAL_TUNNEL_URL', ''), '/'),
-        // Two developers can run `composer dev` at once, each on their own
-        // reverse-tunnel port. Format: "extension:port,extension:port". An
-        // extension not listed here uses the port already baked into
-        // xml_curl_local_tunnel_url.
-        'xml_curl_local_test_extension_ports' => array_reduce(
+        //
+        // Each developer owns a distinct extension-number prefix routed to
+        // their own tunnel port, so new local extensions just need to fall
+        // under an existing prefix - no per-extension config edit needed.
+        // Format: "prefix:port,prefix:port" (e.g. "100:8001,900:8002").
+        'xml_curl_local_test_extension_prefix_ports' => array_reduce(
             array_filter(array_map(
                 'trim',
-                explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSION_PORTS', '')),
+                explode(',', (string) env('FREESWITCH_XML_CURL_LOCAL_TEST_EXTENSION_PREFIX_PORTS', '')),
             )),
             function (array $ports, string $pair): array {
-                [$extension, $port] = array_pad(explode(':', $pair, 2), 2, null);
-                if ($extension !== null && $port !== null && trim($extension) !== '' && trim($port) !== '') {
-                    $ports[trim($extension)] = (int) trim($port);
+                [$prefix, $port] = array_pad(explode(':', $pair, 2), 2, null);
+                if ($prefix !== null && $port !== null && trim($prefix) !== '' && trim($port) !== '') {
+                    $ports[trim($prefix)] = (int) trim($port);
                 }
 
                 return $ports;
             },
             [],
         ),
+        'xml_curl_local_tunnel_url' => rtrim((string) env('FREESWITCH_XML_CURL_LOCAL_TUNNEL_URL', ''), '/'),
         'transfer_dialplan' => env('FREESWITCH_TRANSFER_DIALPLAN', 'XML'),
         // Browser extensions are routed by the public dialplan.  Sending a
         // blind transfer to `default` hits its catch-all/sleep rule instead

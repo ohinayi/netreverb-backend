@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\DialableNumber;
 use App\Models\ServiceNumber;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Config;
@@ -17,8 +16,11 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
     {
         Config::set('telephony.freeswitch.xml_curl_token', 'test-token');
         Config::set('telephony.freeswitch.xml_curl_allowed_ips', ['127.0.0.1']);
-        Config::set('telephony.freeswitch.xml_curl_local_test_extensions', ['100005']);
         Config::set('telephony.freeswitch.xml_curl_local_tunnel_url', 'http://127.0.0.1:8001/api/freeswitch/dialplan.xml');
+        Config::set('telephony.freeswitch.xml_curl_local_test_extension_prefix_ports', [
+            '100' => 8001,
+            '900' => 8002,
+        ]);
     }
 
     public function test_a_local_test_caller_still_resolves_a_production_service_number_locally_registered_or_not(): void
@@ -29,7 +31,7 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
         $serviceNumber->dialableNumber()->update(['number' => '23422222']);
 
         Http::fake([
-            '127.0.0.1:8001/*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
+            '127.0.0.1:*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
         ]);
 
         $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
@@ -66,7 +68,7 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
         $this->configureRouter();
 
         Http::fake([
-            '127.0.0.1:8001/*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
+            '127.0.0.1:*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
         ]);
 
         $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
@@ -79,10 +81,9 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_a_local_test_caller_with_a_port_override_tunnels_to_their_own_port(): void
+    public function test_a_second_prefix_tunnels_to_its_own_port_so_two_developers_can_run_concurrently(): void
     {
         $this->configureRouter();
-        Config::set('telephony.freeswitch.xml_curl_local_test_extension_ports', ['100005' => 8002]);
 
         Http::fake([
             'http://127.0.0.1:8002/*' => Http::response('<local-only-xml/>', 200, ['Content-Type' => 'text/xml']),
@@ -91,7 +92,7 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
 
         $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
             'destination_number' => '23444444',
-            'Caller-Caller-ID-Number' => '100005',
+            'Caller-Caller-ID-Number' => '900001',
             'context' => 'public',
         ]);
 
