@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Enums\MembershipStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,6 +17,9 @@ class UserResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'account_type' => $this->account_type?->value ?? $this->account_type,
+            'has_organization' => $this->organizationMemberships()
+                ->where('status', MembershipStatus::Active->value)
+                ->exists(),
             'is_super_admin' => $this->isSuperAdmin(),
             'email_verified' => $this->hasVerifiedEmail(),
             'country_code' => $this->country_code,

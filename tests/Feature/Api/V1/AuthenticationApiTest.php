@@ -236,6 +236,100 @@ class AuthenticationApiTest extends TestCase
         $this->assertSame('Grace Hopper', $user->refresh()->name);
     }
 
+    public function test_a_brand_new_google_signup_has_no_organization_until_they_complete_setup(): void
+    {
+        $googleUser = $this->fakeGoogleUser([
+            'id' => 'google-999',
+            'name' => 'New Googler',
+            'email' => 'new-googler@example.com',
+            'avatar' => 'https://example.com/new.jpg',
+        ]);
+        $this->mockGoogleDriver($googleUser);
+
+        $this->get('/auth/oauth/google/callback')->assertRedirect();
+
+        $user = User::query()->sole();
+        $this->assertDatabaseCount((new Organization)->getTable(), 0);
+        $this->assertDatabaseCount((new Extension)->getTable(), 0);
+
+        $this->actingAs($user)->getJson('/api/v1/me')
+            ->assertOk()
+            ->assertJsonPath('data.has_organization', false);
+    }
+
+    public function test_completing_organization_creates_an_individual_workspace_and_extension(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/organization', [
+            'account_type' => 'individual',
+            'terms_accepted' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.has_organization', true)
+            ->assertJsonPath('data.account_type', 'individual');
+
+        $organization = Organization::query()->sole();
+        $this->assertSame('individual', $organization->settings['kind']);
+        $this->assertSame($user->id, OrganizationMembership::query()->sole()->user_id);
+        $extension = Extension::query()->sole();
+        $this->assertSame($user->id, $extension->user_id);
+    }
+
+    public function test_completing_organization_creates_a_community_workspace_without_auto_extension(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/organization', [
+            'account_type' => 'community',
+            'workspace_name' => 'Acme Corp',
+            'terms_accepted' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.has_organization', true);
+
+        $organization = Organization::query()->sole();
+        $this->assertSame('Acme Corp', $organization->name);
+        $this->assertSame('community', $organization->settings['kind']);
+        $this->assertDatabaseCount((new Extension)->getTable(), 0);
+    }
+
+    public function test_completing_organization_requires_a_workspace_name_for_community_accounts(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/organization', [
+            'account_type' => 'community',
+            'terms_accepted' => true,
+        ])->assertJsonValidationErrors(['workspace_name']);
+    }
+
+    public function test_completing_organization_twice_returns_conflict_without_creating_a_second_workspace(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/organization', [
+            'account_type' => 'individual',
+            'terms_accepted' => true,
+        ])->assertOk();
+
+        $this->actingAs($user)->postJson('/api/v1/auth/organization', [
+            'account_type' => 'individual',
+            'terms_accepted' => true,
+        ])->assertStatus(409);
+
+        $this->assertDatabaseCount((new Organization)->getTable(), 1);
+    }
+
+    public function test_completing_organization_requires_authentication(): void
+    {
+        $this->postJson('/api/v1/auth/organization', [
+            'account_type' => 'individual',
+            'terms_accepted' => true,
+        ])->assertUnauthorized();
+    }
+
     /** @return array<string, mixed> */
     private function registrationPayload(): array
     {

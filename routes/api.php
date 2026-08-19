@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AiAssistantController;
 use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Api\V1\Auth\CompleteOrganizationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
@@ -94,6 +95,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
         ));
         Route::delete('auth/logout', [AuthenticatedSessionController::class, 'destroy'])
             ->middleware(StartSession::class);
+        Route::post('auth/organization', CompleteOrganizationController::class)
+            ->middleware('throttle:auth-registration');
         Route::post('email/verification-notification', EmailVerificationNotificationController::class)
             ->middleware('throttle:3,1')
             ->name('verification.send');
