@@ -4,16 +4,13 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ConferenceRecordingStatus;
 use App\Enums\ConferenceRecordingTrackStatus;
-use App\Enums\ConferenceTranscriptStatus;
 use App\Http\Controllers\Controller;
 use App\Jobs\CombineConferenceRecordingTracks;
-use App\Jobs\TranscribeConferenceRecordingTrack;
 use App\Models\ConferenceRecording;
 use App\Models\ConferenceRecordingTrack;
 use App\Models\ConferenceRoom;
 use App\Models\Organization;
 use App\Services\ConferenceRecordings\ConferenceRecordingManager;
-use App\Services\ConferenceRecordings\ConferenceTranscriptManager;
 use App\Services\ConferenceRecordings\LiveKitConferenceRecordingManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -22,14 +19,12 @@ use Illuminate\Support\Facades\Storage;
 use Agence104\LiveKit\WebhookReceiver;
 use Livekit\EgressStatus;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ConferenceRecordingController extends Controller
 {
     public function __construct(
         private readonly ConferenceRecordingManager $recordingManager,
         private readonly LiveKitConferenceRecordingManager $liveKitRecordingManager,
-        private readonly ConferenceTranscriptManager $transcriptManager,
     ) {}
 
     public function index(Organization $organization): JsonResponse
@@ -50,18 +45,6 @@ class ConferenceRecordingController extends Controller
                 'duration' => $recording->duration,
                 'size' => $recording->size,
                 'created_at' => $recording->created_at?->toIso8601String(),
-                'transcription_enabled' => (bool) $recording->transcription_enabled,
-                'transcript_status' => $recording->transcript_status?->value,
-                'transcript_error' => $recording->transcript_error,
-                'transcript_download_url' => $recording->transcript_status === ConferenceTranscriptStatus::Ready
-                    && $recording->transcript_file_path
-                    && Storage::disk('livekit_recordings')->exists($recording->transcript_file_path)
-                    ? route('organizations.conference-rooms.recordings.transcript', [
-                        'organization' => $organization->public_id,
-                        'conferenceRoom' => $recording->conferenceRoom?->public_id,
-                        'conferenceRecording' => $recording->recording_id,
-                    ])
-                    : null,
                 'download_url' => $recording->status === ConferenceRecordingStatus::Completed && $recording->storage_key
                     ? Storage::disk('livekit_recordings')->temporaryUrl(
                         $recording->storage_key,
@@ -74,11 +57,11 @@ class ConferenceRecordingController extends Controller
         return response()->json($recordings);
     }
 
-    public function start(Request $request, Organization $organization, ConferenceRoom $conferenceRoom): JsonResponse
+    public function start(Organization $organization, ConferenceRoom $conferenceRoom): JsonResponse
     {
         Gate::authorize('create', [$organization]);
 
-        $recording = $this->liveKitRecordingManager->start($conferenceRoom, $request->boolean('transcription_enabled'));
+        $recording = $this->liveKitRecordingManager->start($conferenceRoom);
 
         return response()->json(['data' => $recording->fresh()]);
     }
@@ -139,59 +122,9 @@ class ConferenceRecordingController extends Controller
             'storage_key' => $fileResult?->getFilename() ?: $track->storage_key,
         ])->save();
 
-        if ($status === ConferenceRecordingTrackStatus::Completed
-            && $track->conferenceRecording?->transcription_enabled
-            && $this->transcriptManager->trackIsTranscribable($track)
-            && in_array($track->transcript_status, [null, ConferenceTranscriptStatus::Pending], true)) {
-            $track->forceFill([
-                'transcript_status' => ConferenceTranscriptStatus::Processing,
-                'transcript_started_at' => now(),
-            ])->save();
-
-            TranscribeConferenceRecordingTrack::dispatch($track->id);
-        }
-
         $this->maybeFinalizeRecording($track->conferenceRecording);
 
         return response()->json(['message' => 'Webhook accepted.']);
-    }
-
-    public function transcript(
-        Organization $organization,
-        ConferenceRoom $conferenceRoom,
-        ConferenceRecording $conferenceRecording,
-    ): StreamedResponse
-    {
-        Gate::authorize('view', $conferenceRecording);
-
-        if ($conferenceRecording->conference_room_id !== $conferenceRoom->id) {
-            abort(404);
-        }
-
-        if ($conferenceRecording->transcript_status !== ConferenceTranscriptStatus::Ready || blank($conferenceRecording->transcript_file_path)) {
-            abort(404);
-        }
-
-        $disk = Storage::disk('livekit_recordings');
-        if (! $disk->exists($conferenceRecording->transcript_file_path)) {
-            abort(404);
-        }
-
-        return response()->streamDownload(function () use ($disk, $conferenceRecording): void {
-            $stream = $disk->readStream($conferenceRecording->transcript_file_path);
-
-            if (! is_resource($stream)) {
-                return;
-            }
-
-            try {
-                fpassthru($stream);
-            } finally {
-                fclose($stream);
-            }
-        }, $conferenceRecording->transcript_file_name ?: ($conferenceRoom->title ?: 'transcript').'-'.$conferenceRecording->recording_id.'.docx', [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        ]);
     }
 
     /**
@@ -244,10 +177,6 @@ class ConferenceRecordingController extends Controller
 
         if ($conferenceRecording->storage_key) {
             $disk->delete($conferenceRecording->storage_key);
-        }
-
-        if ($conferenceRecording->transcript_file_path) {
-            $disk->delete($conferenceRecording->transcript_file_path);
         }
 
         foreach ($conferenceRecording->tracks as $track) {

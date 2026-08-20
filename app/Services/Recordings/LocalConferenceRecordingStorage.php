@@ -42,10 +42,6 @@ class LocalConferenceRecordingStorage implements ConferenceRecordingStorage
         if ($recording->file_path !== null && $recording->file_path !== '') {
             $disk->delete($recording->file_path);
         }
-
-        if ($recording->transcript_file_path !== null && $recording->transcript_file_path !== '') {
-            $disk->delete($recording->transcript_file_path);
-        }
     }
 
     public function exists(ConferenceRecording $recording): bool
