@@ -46,7 +46,7 @@ class FreeSwitchDialplanRouterController extends Controller
             ->whereHas('dialableNumber', fn ($query) => $query->where('number', $number))
             ->exists();
 
-        Log::info('dialplan_router_decision', [
+        Log::error('dialplan_router_decision', [
             'context' => (string) $request->input('context', $request->input('Caller-Context')),
             'callerExtension' => $callerExtension,
             'destination_number' => $number,
