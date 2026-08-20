@@ -124,15 +124,16 @@ class AiAssistantCallFlow
         }
 
         $session->update(['pending_value' => (string) $value]);
-        // Only the caller's actual captured value has to be spoken live
-        // (flite) - the surrounding "You said, for X:" / "Press 1 to
-        // confirm..." wrapper is fixed text, pre-generated in the
-        // assistant's own Piper voice like everything else, instead of the
-        // whole sentence falling back to flite just because part of it is
-        // dynamic.
+        // The caller's actual captured value can't be pre-cached (it's
+        // unknown until they say it), but Piper is fast enough to run
+        // synchronously right here - a few hundred ms for a short phrase -
+        // so it doesn't have to drop to flite (a different, jarring voice)
+        // just because this one piece is dynamic. Falls back to flite only
+        // if synthesis itself fails, same graceful-degrade as everywhere
+        // else Piper is used.
         $voice = $session->assistant->tts_voice ?: AiAssistantPromptSynthesizer::DEFAULT_VOICE;
         $this->appendPlaybackOrSpeak($xml, $condition, $field->confirm_prefix_audio_path, "You said, for {$field->label}:");
-        $this->appendSpeak($xml, $condition, (string) $value);
+        $this->appendDynamicSpeech($xml, $condition, (string) $value, $voice, $session->public_id);
         $this->appendPlaybackOrSpeak(
             $xml, $condition,
             $this->sharedPromptIfExists(AiAssistantPromptSynthesizer::sharedPromptPath($voice, 'confirm-prompt')),
@@ -524,6 +525,25 @@ class AiAssistantCallFlow
         $action = $condition->appendChild($xml->createElement('action'));
         $action->setAttribute('application', 'speak');
         $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $text));
+    }
+
+    /**
+     * Same idea as appendPlaybackOrSpeak, but for text that's only known at
+     * request time (the caller's own captured answer) instead of being
+     * pre-generated ahead of time by AiAssistantPromptSynthesizer. Runs
+     * Piper synchronously - fast enough for a short phrase not to add
+     * noticeable delay to the call - and falls back to flite only if that
+     * synthesis itself fails.
+     */
+    private function appendDynamicSpeech(\DOMDocument $xml, \DOMElement $condition, string $text, string $voice, string $cacheKeySeed): void
+    {
+        if (trim($text) === '') {
+            return;
+        }
+
+        $relativePath = 'ai-assistant-dynamic/'.$cacheKeySeed.'-'.substr(md5($text), 0, 12).'.wav';
+        $generated = $this->piper->generate($text, $relativePath, $voice);
+        $this->appendPlaybackOrSpeak($xml, $condition, $generated, $text);
     }
 
     /**
