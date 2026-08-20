@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ServiceNumber;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class FreeSwitchDialplanRouterController extends Controller
@@ -44,6 +45,15 @@ class FreeSwitchDialplanRouterController extends Controller
             ->where('enabled', true)
             ->whereHas('dialableNumber', fn ($query) => $query->where('number', $number))
             ->exists();
+
+        Log::info('dialplan_router_decision', [
+            'context' => (string) $request->input('context', $request->input('Caller-Context')),
+            'callerExtension' => $callerExtension,
+            'destination_number' => $number,
+            'resolvedPort' => $port,
+            'prodHasServiceNumber' => $prodHasServiceNumber,
+            'willRouteLocal' => $port !== null && $baseTunnelUrl !== '' && ! $prodHasServiceNumber,
+        ]);
 
         if ($port !== null && $baseTunnelUrl !== '' && ! $prodHasServiceNumber) {
             $localTunnelUrl = (string) preg_replace('/:\d+\b/', ':'.$port, $baseTunnelUrl, 1);
