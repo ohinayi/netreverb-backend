@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SmsWalletController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
+use App\Http\Controllers\Api\V1\SuperAdminOperationsController;
 use App\Http\Controllers\Api\V1\SuperAdminPackagesController;
 use App\Http\Controllers\Api\V1\SuperAdminPricingGroupsController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
@@ -110,6 +111,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('notifications.read');
             Route::get('super-admin/analytics', SuperAdminAnalyticsController::class)
                 ->name('super-admin.analytics');
+            Route::get('super-admin/operations', SuperAdminOperationsController::class)
+                ->name('super-admin.operations');
             Route::get('super-admin/sms', [SuperAdminSmsController::class, 'index'])
                 ->name('super-admin.sms.index');
             Route::patch('super-admin/sms/pricing', [SuperAdminSmsController::class, 'updatePricing'])

@@ -73,3 +73,8 @@ Schedule::command('payments:reconcile-sms-credit')
     ->hourly()
     ->onOneServer()
     ->withoutOverlapping();
+
+Schedule::command('telephony:check-infrastructure-health')
+    ->everyFiveMinutes()
+    ->onOneServer()
+    ->withoutOverlapping();
