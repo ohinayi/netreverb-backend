@@ -307,6 +307,7 @@ class AuthenticationApiTest extends TestCase
 
     public function test_completing_organization_twice_returns_conflict_without_creating_a_second_workspace(): void
     {
+        Queue::fake();
         $user = User::factory()->create(['email_verified_at' => now()]);
 
         $this->actingAs($user)->postJson('/api/v1/auth/organization', [

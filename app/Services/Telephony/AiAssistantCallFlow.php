@@ -234,7 +234,9 @@ class AiAssistantCallFlow
 
     private function normalizeDtmfValue(AiAssistantField $field, string $digits): ?string
     {
-        if ($digits === '') return null;
+        if ($digits === '') {
+            return null;
+        }
         if ($field->field_type === 'boolean') {
             return match ($digits) {
                 '1' => 'Yes',
@@ -516,7 +518,9 @@ class AiAssistantCallFlow
 
     private function appendSpeak(\DOMDocument $xml, \DOMElement $condition, string $text): void
     {
-        if (trim($text) === '') return;
+        if (trim($text) === '') {
+            return;
+        }
         $action = $condition->appendChild($xml->createElement('action'));
         $action->setAttribute('application', 'speak');
         $action->setAttribute('data', 'flite|slt|'.str_replace('|', ' ', $text));

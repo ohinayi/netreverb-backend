@@ -149,7 +149,7 @@ class LiveKitConferenceRecordingManager
                 $trackKind['kind'],
                 $trackKind['extension'],
                 $track->getSid(),
-            ) || $startedAny;
+            )|| $startedAny;
         }
 
         return $startedAny;

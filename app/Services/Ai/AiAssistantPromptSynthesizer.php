@@ -53,13 +53,17 @@ class AiAssistantPromptSynthesizer
                 }
             } else {
                 $generated = $this->piper->generate($text, $generatedPath, $voice, self::DEFAULT_SPEED);
-                if ($generated) $field->update(['question_audio_path' => $generated]);
+                if ($generated) {
+                    $field->update(['question_audio_path' => $generated]);
+                }
             }
 
             $confirmPrefixPath = 'ai-assistant-questions/'.$assistant->organization->public_id.'/'.$assistant->public_id.'-'.$field->key.'-confirm-prefix.wav';
             $confirmPrefixText = 'You said, for '.$field->label.':';
             $generatedPrefix = $this->piper->generate($confirmPrefixText, $confirmPrefixPath, $voice, self::DEFAULT_SPEED);
-            if ($generatedPrefix) $field->update(['confirm_prefix_audio_path' => $generatedPrefix]);
+            if ($generatedPrefix) {
+                $field->update(['confirm_prefix_audio_path' => $generatedPrefix]);
+            }
         }
     }
 
@@ -71,7 +75,9 @@ class AiAssistantPromptSynthesizer
 
     private function synthesizeShared(string $voice, string $text, string $path): void
     {
-        if (Storage::disk('public')->exists($path)) return;
+        if (Storage::disk('public')->exists($path)) {
+            return;
+        }
         $this->piper->generate($text, $path, $voice, self::DEFAULT_SPEED);
     }
 
@@ -80,13 +86,16 @@ class AiAssistantPromptSynthesizer
         $text = trim((string) $assistant->$textColumn);
         $generatedPath = 'ai-assistant-'.$slug.'/'.$assistant->organization->public_id.'/'.$assistant->public_id.'.wav';
         if ($text === '') {
-            if ($assistant->$audioColumn === $generatedPath) {
+            if ($generatedPath === $assistant->$audioColumn) {
                 Storage::disk('public')->delete($generatedPath);
                 $assistant->update([$audioColumn => null]);
             }
+
             return;
         }
         $generated = $this->piper->generate($text, $generatedPath, $voice, self::DEFAULT_SPEED);
-        if ($generated) $assistant->update([$audioColumn => $generated]);
+        if ($generated) {
+            $assistant->update([$audioColumn => $generated]);
+        }
     }
 }
