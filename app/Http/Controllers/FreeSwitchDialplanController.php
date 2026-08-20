@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\ServiceNumberType;
 use App\Models\AiAssistant;
+use App\Models\ConferenceRoom;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
@@ -52,6 +53,39 @@ class FreeSwitchDialplanController extends Controller
         }
 
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
+
+        // Conference rooms are dynamically allocated DialableNumbers, not
+        // ServiceNumbers, so the lookup below never finds them - without this
+        // branch they fell into the generic numeric-extension bridge further
+        // down, which re-sends the call out to Kamailio for a number nobody
+        // is registered as, and Kamailio hands it straight back in. That
+        // round-trip repeats until Max-Forwards is exhausted (SIP 483 "Too
+        // Many Hops"), which is why joining a conference room hung on
+        // "connecting..." and then dropped.
+        $conferenceRoom = ConferenceRoom::query()->where('sip_number', $number)->first();
+        if ($conferenceRoom) {
+            $xml = new \DOMDocument('1.0', 'UTF-8');
+            $document = $xml->appendChild($xml->createElement('document'));
+            $document->setAttribute('type', 'freeswitch/xml');
+            $section = $document->appendChild($xml->createElement('section'));
+            $section->setAttribute('name', 'dialplan');
+            $context = $section->appendChild($xml->createElement('context'));
+            $context->setAttribute('name', $contextName);
+
+            $extension = $context->appendChild($xml->createElement('extension'));
+            $extension->setAttribute('name', 'conference-'.$number);
+            $condition = $extension->appendChild($xml->createElement('condition'));
+            $condition->setAttribute('field', 'destination_number');
+            $condition->setAttribute('expression', '^'.preg_quote($number, '/').'$');
+            $answer = $condition->appendChild($xml->createElement('action'));
+            $answer->setAttribute('application', 'answer');
+            $conferenceAction = $condition->appendChild($xml->createElement('action'));
+            $conferenceAction->setAttribute('application', 'conference');
+            $conferenceAction->setAttribute('data', $number.'@default');
+
+            return response($xml->saveXML(), 200, ['Content-Type' => 'text/xml; charset=UTF-8']);
+        }
+
         $service = ServiceNumber::query()->where('enabled', true)->whereHas('dialableNumber', fn ($q) => $q->where('number', $number))->first();
         $ivrId = data_get($service?->configuration, 'ivr_public_id');
         $ivr = $ivrId ? $service?->organization?->ivrs()->with('options')->where('public_id', $ivrId)->where('enabled', true)->first() : null;
