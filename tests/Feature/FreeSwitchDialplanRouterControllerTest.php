@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\OrganizationIvr;
 use App\Models\ServiceNumber;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Config;
@@ -98,6 +99,56 @@ class FreeSwitchDialplanRouterControllerTest extends TestCase
 
         $response->assertOk();
         Http::assertSent(fn ($request) => str_starts_with((string) $request->url(), 'http://127.0.0.1:8002/'));
+    }
+
+    public function test_an_ivr_digit_press_continuation_stays_on_production_even_though_the_pressed_digit_alone_is_not_a_service_number(): void
+    {
+        $this->configureRouter();
+
+        $ivr = OrganizationIvr::query()->create([
+            'organization_id' => \App\Models\Organization::factory()->create()->id,
+            'name' => 'Test IVR',
+            'welcome_text' => 'Welcome',
+            'max_retries' => 3,
+            'timeout_seconds' => 10,
+            'enabled' => true,
+        ]);
+
+        Http::fake([
+            '127.0.0.1:*' => Http::response('SHOULD_NOT_BE_CALLED', 200),
+        ]);
+
+        // FreeSWITCH's re-fetch after a digit press sends the pressed digit
+        // as destination_number, not the original service number - "1" is
+        // never going to be a real ServiceNumber, so the router has to
+        // recognize the ivr-options-<id> context itself belongs to
+        // production instead.
+        $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
+            'destination_number' => '1',
+            'Caller-Caller-ID-Number' => '900005',
+            'context' => 'ivr-options-'.$ivr->public_id,
+        ]);
+
+        $response->assertOk();
+        Http::assertNothingSent();
+    }
+
+    public function test_an_unknown_continuation_context_still_falls_back_to_the_local_tunnel(): void
+    {
+        $this->configureRouter();
+
+        Http::fake([
+            'http://127.0.0.1:8001/*' => Http::response('<local-only-xml/>', 200, ['Content-Type' => 'text/xml']),
+        ]);
+
+        $response = $this->postJson('/api/freeswitch/dialplan-router.xml?token=test-token', [
+            'destination_number' => '1',
+            'Caller-Caller-ID-Number' => '100005',
+            'context' => 'ivr-options-not-a-real-ivr-id',
+        ]);
+
+        $response->assertOk();
+        Http::assertSent(fn ($request) => str_starts_with((string) $request->url(), 'http://127.0.0.1:8001/'));
     }
 
     public function test_falls_through_to_production_when_the_local_tunnel_is_unreachable(): void
