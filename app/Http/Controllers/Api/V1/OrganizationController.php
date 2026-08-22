@@ -8,6 +8,7 @@ use App\Actions\Organizations\CreateOrganization;
 use App\Actions\Organizations\SyncOrganizationMemberFriendships;
 use App\Enums\MembershipRole;
 use App\Enums\MembershipStatus;
+use App\Enums\RingbackAdStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\InviteOrganizationMemberRequest;
 use App\Http\Requests\Api\V1\StoreOrganizationRequest;
@@ -166,6 +167,25 @@ class OrganizationController extends Controller
         return response()->json(['data' => [
             'url' => $path ? '/storage/'.ltrim($path, '/') : null,
         ]]);
+    }
+
+    public function requestAdExemption(Request $request, Organization $organization): OrganizationResource
+    {
+        Gate::authorize('update', $organization);
+        abort_if($organization->isPersonalWorkspace(), 422, 'Personal accounts are never ad-exempt.');
+        abort_if($organization->ad_exempt, 422, 'This workspace is already ad-exempt.');
+        abort_if($organization->ad_exemption_status === RingbackAdStatus::Pending, 422, 'A request is already pending review.');
+
+        $organization->update(['ad_exemption_status' => RingbackAdStatus::Pending]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'organization.ad_exemption.requested',
+            $organization,
+        );
+
+        return new OrganizationResource($organization);
     }
 
     public function members(Organization $organization): AnonymousResourceCollection

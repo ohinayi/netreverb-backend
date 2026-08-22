@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'payment_required',
     'payment_confirmed',
     'ad_exempt',
+    'ad_exemption_status',
 ])]
 class Organization extends Model
 {
@@ -366,6 +367,7 @@ class Organization extends Model
             'settings' => 'array',
             'payment_required' => 'boolean',
             'ad_exempt' => 'boolean',
+            'ad_exemption_status' => RingbackAdStatus::class,
             'payment_confirmed' => 'boolean',
         ];
     }

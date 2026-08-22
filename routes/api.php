@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\MessageController;
 use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\CallRingbackAudioController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OrganizationRingbackAdController;
 use App\Http\Controllers\Api\V1\OrganizationIvrController;
@@ -141,6 +142,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('super-admin.organizations.billing.update');
             Route::patch('super-admin/organizations/{organization}/ad-exemption', [SuperAdminPricingGroupsController::class, 'updateAdExemption'])
                 ->name('super-admin.organizations.ad-exemption.update');
+            Route::patch('super-admin/organizations/{organization}/ad-exemption-request', [SuperAdminPricingGroupsController::class, 'decideAdExemptionRequest'])
+                ->name('super-admin.organizations.ad-exemption-request.update');
             Route::apiResource('super-admin/ringback-ads', SuperAdminRingbackAdsController::class)
                 ->parameters(['ringback-ads' => 'ringbackAd'])
                 ->only(['index', 'store', 'update', 'destroy']);
@@ -168,6 +171,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
             Route::post('organizations/{organization}/ringback-audio', [OrganizationController::class, 'uploadRingbackAudio']);
             Route::delete('organizations/{organization}/ringback-audio', [OrganizationController::class, 'removeRingbackAudio']);
             Route::get('organizations/{organization}/ringback-audio/effective', [OrganizationController::class, 'effectiveRingbackAudio']);
+            Route::post('organizations/{organization}/ad-exemption-request', [OrganizationController::class, 'requestAdExemption']);
+            Route::get('call-ringback-audio', [CallRingbackAudioController::class, 'effective']);
             Route::get('organizations/{organization}/ringback-ads', [OrganizationRingbackAdController::class, 'index']);
             Route::post('organizations/{organization}/ringback-ads', [OrganizationRingbackAdController::class, 'store']);
             Route::apiResource('organizations.workspaces', WorkspaceController::class)

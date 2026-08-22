@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\RingbackAdStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\PricingGroup;
@@ -143,7 +144,33 @@ class SuperAdminPricingGroupsController extends Controller
             'ad_exempt' => ['required', 'boolean'],
         ]);
 
-        $organization->update($validated);
+        $organization->update([
+            ...$validated,
+            // A direct manual override settles any open request one way or
+            // the other, so the org sees a clean slate to ask again later.
+            'ad_exemption_status' => $validated['ad_exempt'] ? RingbackAdStatus::Approved : null,
+        ]);
+
+        return response()->json(['data' => $organization->fresh()]);
+    }
+
+    /**
+     * Approve or deny an org's self-service ad-exemption request. Denying
+     * leaves ad_exempt untouched (it was already false to have a pending
+     * request) but resets the status so the org can request again.
+     */
+    public function decideAdExemptionRequest(Request $request, Organization $organization): JsonResponse
+    {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+        abort_if($organization->ad_exemption_status !== RingbackAdStatus::Pending, 422, 'No pending request for this organization.');
+
+        $validated = $request->validate([
+            'approve' => ['required', 'boolean'],
+        ]);
+
+        $organization->update($validated['approve']
+            ? ['ad_exempt' => true, 'ad_exemption_status' => RingbackAdStatus::Approved]
+            : ['ad_exemption_status' => RingbackAdStatus::Rejected]);
 
         return response()->json(['data' => $organization->fresh()]);
     }

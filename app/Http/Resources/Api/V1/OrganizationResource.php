@@ -27,6 +27,7 @@ class OrganizationResource extends JsonResource
             'locale' => $this->locale,
             'settings' => $this->settings,
             'ad_exempt' => (bool) $this->ad_exempt,
+            'ad_exemption_status' => $this->ad_exemption_status?->value,
             'pricing_group_id' => $this->pricingGroup?->public_id,
             'available_features' => $this->availableFeatures(),
             'operational_policy' => $this->operationalPolicy(),

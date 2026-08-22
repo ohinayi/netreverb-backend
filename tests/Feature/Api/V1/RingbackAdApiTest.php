@@ -131,4 +131,72 @@ class RingbackAdApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.url', '/storage/ringback-audio/own/hold.wav');
     }
+
+    public function test_org_admin_can_request_exemption_once_and_super_admin_can_approve_it(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ad-exemption-request")
+            ->assertOk()
+            ->assertJsonPath('data.ad_exemption_status', 'pending');
+
+        // A second request while one is already pending is rejected.
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ad-exemption-request")
+            ->assertStatus(422);
+
+        Sanctum::actingAs(User::factory()->create());
+        $this->patchJson("/api/v1/super-admin/organizations/{$organization->public_id}/ad-exemption-request", [
+            'approve' => true,
+        ])->assertForbidden();
+
+        Sanctum::actingAs(User::factory()->create(['is_super_admin' => true]));
+        $this->patchJson("/api/v1/super-admin/organizations/{$organization->public_id}/ad-exemption-request", [
+            'approve' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.ad_exempt', true)
+            ->assertJsonPath('data.ad_exemption_status', 'approved');
+    }
+
+    public function test_denying_a_request_leaves_ad_exempt_false_and_allows_a_new_request(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ad-exemption-request")->assertOk();
+
+        Sanctum::actingAs(User::factory()->create(['is_super_admin' => true]));
+        $this->patchJson("/api/v1/super-admin/organizations/{$organization->public_id}/ad-exemption-request", [
+            'approve' => false,
+        ])->assertOk()
+            ->assertJsonPath('data.ad_exempt', false)
+            ->assertJsonPath('data.ad_exemption_status', 'rejected');
+
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/organizations/{$organization->public_id}/ad-exemption-request")
+            ->assertOk()
+            ->assertJsonPath('data.ad_exemption_status', 'pending');
+    }
+
+    public function test_call_ringback_audio_resolves_by_the_callee_number_not_the_caller_org(): void
+    {
+        $exemptOrg = Organization::factory()->create(['ad_exempt' => true, 'settings' => [
+            'ringback_audio' => ['audio_path' => 'ringback-audio/callee/hold.wav'],
+        ]]);
+        $callee = \App\Models\DialableNumber::factory()->create([
+            'organization_id' => $exemptOrg->id, 'number' => '900123',
+        ]);
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->getJson('/api/v1/call-ringback-audio?number=900123')
+            ->assertOk()
+            ->assertJsonPath('data.url', '/storage/ringback-audio/callee/hold.wav');
+
+        $this->getJson('/api/v1/call-ringback-audio?number=000000')
+            ->assertOk()
+            ->assertJsonPath('data.url', null);
+    }
 }

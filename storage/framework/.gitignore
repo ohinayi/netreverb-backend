@@ -7,4 +7,4 @@ routes.php
 routes.scanned.php
 schedule-*
 services.json
-/storage/framework/lsp-*.php
+lsp-*.php
