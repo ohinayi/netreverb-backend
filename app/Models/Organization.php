@@ -6,6 +6,7 @@ use App\Enums\CallRecordingAnnouncementTarget;
 use App\Enums\ExtensionProvisioningMode;
 use App\Enums\MembershipStatus;
 use App\Enums\OrganizationStatus;
+use App\Enums\RingbackAdStatus;
 use App\Support\FeatureCatalog;
 use Database\Factories\OrganizationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -30,6 +31,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'pricing_group_id',
     'payment_required',
     'payment_confirmed',
+    'ad_exempt',
 ])]
 class Organization extends Model
 {
@@ -250,6 +252,34 @@ class Organization extends Model
         return is_string($path) && trim($path) !== '' ? trim($path) : null;
     }
 
+    public function ringbackAds(): HasMany
+    {
+        return $this->hasMany(RingbackAd::class);
+    }
+
+    /**
+     * What actually plays for a waiting caller: the org's own custom audio
+     * only if it has separately paid for ad-exemption - otherwise (and
+     * always, for a personal/individual workspace, which can never be
+     * exempt) a random clip from the shared, moderated ad pool. Null means
+     * fall back to the default tone - either no custom audio was uploaded,
+     * or the ad pool is currently empty.
+     */
+    public function effectiveRingbackAudioPath(): ?string
+    {
+        if ($this->ad_exempt && ! $this->isPersonalWorkspace()) {
+            return $this->ringbackAudioPath();
+        }
+
+        $ad = RingbackAd::query()
+            ->where('status', RingbackAdStatus::Approved)
+            ->where('enabled', true)
+            ->inRandomOrder()
+            ->first();
+
+        return $ad?->audio_path;
+    }
+
     /**
      * Organization-controlled operational policy with conservative bounds.
      *
@@ -335,6 +365,7 @@ class Organization extends Model
             'extension_provisioning_mode' => ExtensionProvisioningMode::class,
             'settings' => 'array',
             'payment_required' => 'boolean',
+            'ad_exempt' => 'boolean',
             'payment_confirmed' => 'boolean',
         ];
     }

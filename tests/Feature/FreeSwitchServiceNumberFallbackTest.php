@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\ServiceNumberType;
 use App\Models\Organization;
+use App\Models\RingbackAd;
 use App\Models\ServiceNumber;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
@@ -56,12 +57,13 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
         $this->assertStringContainsString('application="hangup"', $xml);
     }
 
-    public function test_a_direct_service_number_bridge_sets_ringback_before_the_bridge_when_the_org_has_custom_audio(): void
+    public function test_a_direct_service_number_bridge_sets_ringback_before_the_bridge_when_the_ad_exempt_org_has_custom_audio(): void
     {
         $this->allowXmlCurl();
-        $organization = Organization::factory()->create(['settings' => [
-            'ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav'],
-        ]]);
+        $organization = Organization::factory()->create([
+            'ad_exempt' => true,
+            'settings' => ['ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav']],
+        ]);
         $service = ServiceNumber::factory()->for($organization)->create([
             'type' => ServiceNumberType::Custom,
             'target' => '9001',
@@ -96,5 +98,32 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
 
         $response->assertOk();
         $this->assertStringNotContainsString('ringback=', $response->getContent());
+    }
+
+    public function test_a_direct_service_number_bridge_plays_a_pool_ad_for_a_non_exempt_org_instead_of_its_own_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create([
+            'ad_exempt' => false,
+            'settings' => ['ringback_audio' => ['audio_path' => 'ringback-audio/own/hold.wav']],
+        ]);
+        RingbackAd::query()->create([
+            'title' => 'Approved ad', 'audio_path' => 'ringback-ads/pool-ad.wav',
+            'status' => 'approved', 'enabled' => true,
+        ]);
+        $service = ServiceNumber::factory()->for($organization)->create([
+            'type' => ServiceNumberType::Custom,
+            'target' => '9001',
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('ringback=', $xml);
+        $this->assertStringContainsString('pool-ad.wav', $xml);
+        $this->assertStringNotContainsString('ringback-audio/own/hold.wav', $xml);
     }
 }

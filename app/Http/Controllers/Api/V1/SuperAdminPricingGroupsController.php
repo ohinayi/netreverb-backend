@@ -127,4 +127,24 @@ class SuperAdminPricingGroupsController extends Controller
             'data' => $organization->fresh()->load('pricingGroup'),
         ]);
     }
+
+    /**
+     * A standalone toggle, deliberately separate from payment_required/
+     * payment_confirmed above - this gates whether the org's own ringback
+     * audio plays instead of the shared ad pool, not broader feature access.
+     * A personal/individual workspace can never be exempt.
+     */
+    public function updateAdExemption(Request $request, Organization $organization): JsonResponse
+    {
+        abort_unless($request->user()?->isSuperAdmin(), 403);
+        abort_if($organization->isPersonalWorkspace(), 422);
+
+        $validated = $request->validate([
+            'ad_exempt' => ['required', 'boolean'],
+        ]);
+
+        $organization->update($validated);
+
+        return response()->json(['data' => $organization->fresh()]);
+    }
 }

@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\OrganizationRingbackAdController;
 use App\Http\Controllers\Api\V1\OrganizationIvrController;
 use App\Http\Controllers\Api\V1\OutboundCampaignController;
 use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\SuperAdminOperationsController;
 use App\Http\Controllers\Api\V1\SuperAdminPackagesController;
 use App\Http\Controllers\Api\V1\SuperAdminPricingGroupsController;
+use App\Http\Controllers\Api\V1\SuperAdminRingbackAdsController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
 use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
@@ -137,6 +139,11 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('super-admin.organizations.pricing-group.assign');
             Route::patch('super-admin/organizations/{organization}/billing', [SuperAdminPricingGroupsController::class, 'updateBilling'])
                 ->name('super-admin.organizations.billing.update');
+            Route::patch('super-admin/organizations/{organization}/ad-exemption', [SuperAdminPricingGroupsController::class, 'updateAdExemption'])
+                ->name('super-admin.organizations.ad-exemption.update');
+            Route::apiResource('super-admin/ringback-ads', SuperAdminRingbackAdsController::class)
+                ->parameters(['ringback-ads' => 'ringbackAd'])
+                ->only(['index', 'store', 'update', 'destroy']);
             Route::get('webrtc/bootstrap', WebRtcBootstrapController::class)
                 ->middleware('throttle:webrtc-bootstrap')
                 ->name('webrtc.bootstrap');
@@ -160,6 +167,9 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
             Route::post('organizations/{organization}/ringback-audio', [OrganizationController::class, 'uploadRingbackAudio']);
             Route::delete('organizations/{organization}/ringback-audio', [OrganizationController::class, 'removeRingbackAudio']);
+            Route::get('organizations/{organization}/ringback-audio/effective', [OrganizationController::class, 'effectiveRingbackAudio']);
+            Route::get('organizations/{organization}/ringback-ads', [OrganizationRingbackAdController::class, 'index']);
+            Route::post('organizations/{organization}/ringback-ads', [OrganizationRingbackAdController::class, 'store']);
             Route::apiResource('organizations.workspaces', WorkspaceController::class)
                 ->except(['create', 'edit'])
                 ->parameters(['workspaces' => 'workspace']);

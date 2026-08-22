@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
+use App\Models\RingbackAd;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
 
@@ -105,12 +106,13 @@ class FreeSwitchIvrDialplanTest extends TestCase
         $this->assertStringContainsString('NORMAL_CLEARING', $xml);
     }
 
-    public function test_an_ivr_extension_transfer_sets_ringback_before_the_bridge_when_the_org_has_custom_audio(): void
+    public function test_an_ivr_extension_transfer_sets_ringback_before_the_bridge_when_the_ad_exempt_org_has_custom_audio(): void
     {
         $this->allowXmlCurl();
-        $organization = Organization::factory()->create(['settings' => [
-            'ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav'],
-        ]]);
+        $organization = Organization::factory()->create([
+            'ad_exempt' => true,
+            'settings' => ['ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav']],
+        ]);
         $ivr = OrganizationIvr::create([
             'organization_id' => $organization->id, 'name' => 'Sales', 'enabled' => true,
         ]);
@@ -153,5 +155,36 @@ class FreeSwitchIvrDialplanTest extends TestCase
 
         $response->assertOk();
         $this->assertStringNotContainsString('ringback=', $response->getContent());
+    }
+
+    public function test_an_ivr_extension_transfer_plays_a_pool_ad_for_a_non_exempt_org_instead_of_its_own_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create([
+            'ad_exempt' => false,
+            'settings' => ['ringback_audio' => ['audio_path' => 'ringback-audio/own/hold.wav']],
+        ]);
+        RingbackAd::query()->create([
+            'title' => 'Approved ad', 'audio_path' => 'ringback-ads/pool-ad.wav',
+            'status' => 'approved', 'enabled' => true,
+        ]);
+        $ivr = OrganizationIvr::create([
+            'organization_id' => $organization->id, 'name' => 'Sales', 'enabled' => true,
+        ]);
+        OrganizationIvrOption::create([
+            'organization_ivr_id' => $ivr->id, 'digit' => '1', 'label' => 'Agent',
+            'destination_type' => 'extension', 'destination' => '9001', 'enabled' => true,
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='
+                .'ivr-options-'.$ivr->public_id.'&destination_number=1'
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('ringback=', $xml);
+        $this->assertStringContainsString('pool-ad.wav', $xml);
+        $this->assertStringNotContainsString('ringback-audio/own/hold.wav', $xml);
     }
 }

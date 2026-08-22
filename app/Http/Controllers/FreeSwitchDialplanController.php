@@ -221,7 +221,7 @@ class FreeSwitchDialplanController extends Controller
      */
     private function appendRingbackOverride(\DOMDocument $xml, \DOMElement $condition, ?Organization $organization): void
     {
-        $path = $organization?->ringbackAudioPath();
+        $path = $organization?->effectiveRingbackAudioPath();
         if (! $path) {
             return;
         }

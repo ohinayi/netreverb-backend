@@ -153,6 +153,21 @@ class OrganizationController extends Controller
         return OrganizationResource::make($this->loadOperationalContext($organization->refresh(), $request));
     }
 
+    /**
+     * What should actually play right now for a waiting caller - resolved
+     * fresh per call, since a non-exempt org gets a random pick from the ad
+     * pool each time, not a cached value.
+     */
+    public function effectiveRingbackAudio(Organization $organization): JsonResponse
+    {
+        Gate::authorize('view', $organization);
+        $path = $organization->effectiveRingbackAudioPath();
+
+        return response()->json(['data' => [
+            'url' => $path ? '/storage/'.ltrim($path, '/') : null,
+        ]]);
+    }
+
     public function members(Organization $organization): AnonymousResourceCollection
     {
         Gate::authorize('view', $organization);
