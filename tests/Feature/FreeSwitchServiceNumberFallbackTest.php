@@ -55,4 +55,46 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
         $this->assertStringContainsString('temporarily unavailable', $xml);
         $this->assertStringContainsString('application="hangup"', $xml);
     }
+
+    public function test_a_direct_service_number_bridge_sets_ringback_before_the_bridge_when_the_org_has_custom_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create(['settings' => [
+            'ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav'],
+        ]]);
+        $service = ServiceNumber::factory()->for($organization)->create([
+            'type' => ServiceNumberType::Custom,
+            'target' => '9001',
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('ringback=', $xml);
+        $this->assertStringContainsString($organization->ringbackAudioPath(), $xml);
+        $this->assertTrue(
+            strpos($xml, 'ringback=') < strpos($xml, 'application="bridge"'),
+            'ringback must be set before the bridge action runs',
+        );
+    }
+
+    public function test_a_direct_service_number_bridge_has_no_ringback_override_without_custom_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $service = ServiceNumber::factory()->for($organization)->create([
+            'type' => ServiceNumberType::Custom,
+            'target' => '9001',
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $this->assertStringNotContainsString('ringback=', $response->getContent());
+    }
 }

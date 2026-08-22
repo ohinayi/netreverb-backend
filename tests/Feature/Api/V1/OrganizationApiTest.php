@@ -10,6 +10,8 @@ use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -110,6 +112,68 @@ class OrganizationApiTest extends TestCase
                 'audio_path' => '/usr/local/freeswitch/sounds/custom/recording_notice.wav',
             ],
         ], $organization->settings);
+    }
+
+    public function test_admin_can_upload_and_replace_custom_ringback_audio(): void
+    {
+        Storage::fake('public');
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $response = $this->post("/api/v1/organizations/{$organization->public_id}/ringback-audio", [
+            'audio' => UploadedFile::fake()->create('hold.wav', 500, 'audio/wav'),
+        ])->assertOk();
+
+        $firstPath = $response->json('data.settings.ringback_audio.audio_path');
+        $this->assertNotNull($firstPath);
+        Storage::disk('public')->assertExists($firstPath);
+        $organization->refresh();
+        $this->assertSame($firstPath, $organization->ringbackAudioPath());
+
+        // Uploading a replacement deletes the previous file.
+        $response = $this->post("/api/v1/organizations/{$organization->public_id}/ringback-audio", [
+            'audio' => UploadedFile::fake()->create('new-hold.wav', 500, 'audio/wav'),
+        ])->assertOk();
+
+        $secondPath = $response->json('data.settings.ringback_audio.audio_path');
+        $this->assertNotSame($firstPath, $secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+        Storage::disk('public')->assertExists($secondPath);
+    }
+
+    public function test_member_cannot_upload_custom_ringback_audio(): void
+    {
+        Storage::fake('public');
+        $organization = Organization::factory()->create();
+        $member = User::factory()->create();
+        OrganizationMembership::factory()->for($organization)->for($member)->create();
+        Sanctum::actingAs($member);
+
+        $this->post("/api/v1/organizations/{$organization->public_id}/ringback-audio", [
+            'audio' => UploadedFile::fake()->create('hold.wav', 500, 'audio/wav'),
+        ])->assertForbidden();
+    }
+
+    public function test_admin_can_remove_custom_ringback_audio(): void
+    {
+        Storage::fake('public');
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->create();
+        OrganizationMembership::factory()->admin()->for($organization)->for($admin)->create();
+        Sanctum::actingAs($admin);
+
+        $path = $this->post("/api/v1/organizations/{$organization->public_id}/ringback-audio", [
+            'audio' => UploadedFile::fake()->create('hold.wav', 500, 'audio/wav'),
+        ])->json('data.settings.ringback_audio.audio_path');
+
+        $this->deleteJson("/api/v1/organizations/{$organization->public_id}/ringback-audio")
+            ->assertOk()
+            ->assertJsonPath('data.settings.ringback_audio', null);
+
+        Storage::disk('public')->assertMissing($path);
+        $this->assertNull($organization->refresh()->ringbackAudioPath());
     }
 
     public function test_operational_policy_is_normalized_and_partial_settings_updates_are_merged(): void

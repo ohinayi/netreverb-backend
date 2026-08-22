@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ServiceNumberType;
 use App\Models\AiAssistant;
 use App\Models\ConferenceRoom;
+use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
@@ -148,7 +149,7 @@ class FreeSwitchDialplanController extends Controller
                 // serves the `transfer ... XML ivr-options-...` re-fetch.
                 $optionsContext = $section->appendChild($xml->createElement('context'));
                 $optionsContext->setAttribute('name', $this->optionsContextName($ivr));
-                $this->appendOptionExtensions($xml, $optionsContext, $section, $options);
+                $this->appendOptionExtensions($xml, $optionsContext, $section, $options, $ivr->organization);
             }
         } elseif ($assistant) {
             $this->aiAssistantCallFlow->emitEntry($xml, $condition, $assistant);
@@ -164,6 +165,7 @@ class FreeSwitchDialplanController extends Controller
             $hangup->setAttribute('application', 'hangup');
             $hangup->setAttribute('data', 'NORMAL_CLEARING');
         } elseif ($service?->target) {
+            $this->appendRingbackOverride($xml, $condition, $service->organization);
             $action = $condition->appendChild($xml->createElement('action'));
             $action->setAttribute('application', 'bridge');
             // Browser extensions register externally through Kamailio, not in
@@ -205,9 +207,33 @@ class FreeSwitchDialplanController extends Controller
         }
 
         $options = $ivr->options()->where('enabled', true)->where('digit', $digit)->orderBy('sort_order')->get();
-        $this->appendOptionExtensions($xml, $context, $section, $options);
+        $this->appendOptionExtensions($xml, $context, $section, $options, $ivr->organization);
 
         return response($xml->saveXML(), 200, ['Content-Type' => 'text/xml; charset=UTF-8']);
+    }
+
+    /**
+     * Sets FreeSWITCH's `ringback=` channel variable to the org's custom
+     * hold/ringback audio, if configured, so an external caller hears it
+     * while waiting to be bridged instead of the default tone. Must run
+     * before the bridge action itself - `ringback=` only affects a bridge
+     * that hasn't started yet.
+     */
+    private function appendRingbackOverride(\DOMDocument $xml, \DOMElement $condition, ?Organization $organization): void
+    {
+        $path = $organization?->ringbackAudioPath();
+        if (! $path) {
+            return;
+        }
+
+        $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+        $resolvedPath = $audioBaseUrl !== ''
+            ? $audioBaseUrl.'/storage/'.ltrim($path, '/')
+            : storage_path('app/public/'.$path);
+
+        $action = $condition->appendChild($xml->createElement('action'));
+        $action->setAttribute('application', 'set');
+        $action->setAttribute('data', 'ringback='.$resolvedPath);
     }
 
     private function optionsContextName(OrganizationIvr $ivr): string
@@ -306,7 +332,7 @@ class FreeSwitchDialplanController extends Controller
     }
 
     /** @param Collection<int, OrganizationIvrOption> $options */
-    private function appendOptionExtensions(\DOMDocument $xml, \DOMElement $context, \DOMElement $section, $options): void
+    private function appendOptionExtensions(\DOMDocument $xml, \DOMElement $context, \DOMElement $section, $options, ?Organization $organization = null): void
     {
         // Create an exact route for each key press in the IVR's own
         // context. This prevents one option from matching every digit.
@@ -350,6 +376,9 @@ class FreeSwitchDialplanController extends Controller
                 continue;
             }
 
+            if ($type !== 'hangup' && $type !== 'queue') {
+                $this->appendRingbackOverride($xml, $digitCondition, $organization);
+            }
             $action = $digitCondition->appendChild($xml->createElement('action'));
             if ($type === 'hangup') {
                 $action->setAttribute('application', 'hangup');

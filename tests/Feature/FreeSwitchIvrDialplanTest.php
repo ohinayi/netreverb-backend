@@ -104,4 +104,54 @@ class FreeSwitchIvrDialplanTest extends TestCase
         $this->assertStringContainsString('application="hangup"', $xml);
         $this->assertStringContainsString('NORMAL_CLEARING', $xml);
     }
+
+    public function test_an_ivr_extension_transfer_sets_ringback_before_the_bridge_when_the_org_has_custom_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create(['settings' => [
+            'ringback_audio' => ['audio_path' => 'ringback-audio/'.fake()->uuid().'/hold.wav'],
+        ]]);
+        $ivr = OrganizationIvr::create([
+            'organization_id' => $organization->id, 'name' => 'Sales', 'enabled' => true,
+        ]);
+        OrganizationIvrOption::create([
+            'organization_ivr_id' => $ivr->id, 'digit' => '1', 'label' => 'Agent',
+            'destination_type' => 'extension', 'destination' => '9001', 'enabled' => true,
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='
+                .'ivr-options-'.$ivr->public_id.'&destination_number=1'
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('ringback=', $xml);
+        $this->assertStringContainsString($organization->ringbackAudioPath(), $xml);
+        $this->assertTrue(
+            strpos($xml, 'ringback=') < strpos($xml, 'application="bridge"'),
+            'ringback must be set before the bridge action runs',
+        );
+    }
+
+    public function test_an_ivr_extension_transfer_has_no_ringback_override_without_custom_audio(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $ivr = OrganizationIvr::create([
+            'organization_id' => $organization->id, 'name' => 'Sales', 'enabled' => true,
+        ]);
+        OrganizationIvrOption::create([
+            'organization_ivr_id' => $ivr->id, 'digit' => '1', 'label' => 'Agent',
+            'destination_type' => 'extension', 'destination' => '9001', 'enabled' => true,
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='
+                .'ivr-options-'.$ivr->public_id.'&destination_number=1'
+        );
+
+        $response->assertOk();
+        $this->assertStringNotContainsString('ringback=', $response->getContent());
+    }
 }

@@ -236,6 +236,21 @@ class Organization extends Model
     }
 
     /**
+     * The org's custom ringback/hold audio, played instead of the default
+     * tone while an external caller waits - both for an inbound service
+     * number call (FreeSWITCH ringback=) and for an extension-to-extension
+     * call (client-side CallerWaitAudioController), which never touches
+     * FreeSWITCH and so cannot share a server-side ringback= mechanism.
+     */
+    public function ringbackAudioPath(): ?string
+    {
+        $settings = is_array($this->settings) ? $this->settings : [];
+        $path = $settings['ringback_audio']['audio_path'] ?? null;
+
+        return is_string($path) && trim($path) !== '' ? trim($path) : null;
+    }
+
+    /**
      * Organization-controlled operational policy with conservative bounds.
      *
      * @return array{

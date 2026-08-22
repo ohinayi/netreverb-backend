@@ -24,6 +24,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 
 class OrganizationController extends Controller
 {
@@ -95,6 +96,58 @@ class OrganizationController extends Controller
             $organization,
             $before,
             $organization->fresh()->only(['name', 'slug', 'timezone', 'locale', 'settings']),
+        );
+
+        return OrganizationResource::make($this->loadOperationalContext($organization->refresh(), $request));
+    }
+
+    public function uploadRingbackAudio(Request $request, Organization $organization): OrganizationResource
+    {
+        Gate::authorize('update', $organization);
+        $request->validate([
+            'audio' => ['required', 'file', 'mimes:wav,mp3,ogg,m4a', 'max:10240'],
+        ]);
+
+        $previousPath = $organization->ringbackAudioPath();
+        $path = $request->file('audio')->store('ringback-audio/'.$organization->public_id, 'public');
+        if ($previousPath) {
+            Storage::disk('public')->delete($previousPath);
+        }
+
+        $settings = is_array($organization->settings) ? $organization->settings : [];
+        $settings['ringback_audio'] = ['audio_path' => $path];
+        $organization->update(['settings' => $settings]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'organization.ringback_audio.uploaded',
+            $organization,
+            after: ['audio_path' => $path],
+        );
+
+        return OrganizationResource::make($this->loadOperationalContext($organization->refresh(), $request));
+    }
+
+    public function removeRingbackAudio(Request $request, Organization $organization): OrganizationResource
+    {
+        Gate::authorize('update', $organization);
+
+        $previousPath = $organization->ringbackAudioPath();
+        if ($previousPath) {
+            Storage::disk('public')->delete($previousPath);
+        }
+
+        $settings = is_array($organization->settings) ? $organization->settings : [];
+        unset($settings['ringback_audio']);
+        $organization->update(['settings' => $settings]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'organization.ringback_audio.removed',
+            $organization,
+            before: ['audio_path' => $previousPath],
         );
 
         return OrganizationResource::make($this->loadOperationalContext($organization->refresh(), $request));

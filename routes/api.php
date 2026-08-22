@@ -158,6 +158,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 ->name('conference-rooms.chat.messages.store');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
+            Route::post('organizations/{organization}/ringback-audio', [OrganizationController::class, 'uploadRingbackAudio']);
+            Route::delete('organizations/{organization}/ringback-audio', [OrganizationController::class, 'removeRingbackAudio']);
             Route::apiResource('organizations.workspaces', WorkspaceController::class)
                 ->except(['create', 'edit'])
                 ->parameters(['workspaces' => 'workspace']);
