@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Notifications\VerifyEmailNotification;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Socialite\Facades\Socialite;
 use Mockery;
@@ -204,6 +205,41 @@ class AuthenticationApiTest extends TestCase
         $this->assertSame('Grace Hopper', $user->refresh()->name);
     }
 
+    public function test_mobile_google_oauth_redirects_to_the_app_with_a_bearer_token_instead_of_a_session(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Sulaimon John',
+            'email' => 'person@example.com',
+            'email_verified_at' => now(),
+        ]);
+
+        $googleUser = $this->fakeGoogleUser([
+            'id' => 'google-mobile-1',
+            'name' => 'Sulaimon John',
+            'email' => $user->email,
+            'avatar' => 'https://example.com/avatar.jpg',
+        ]);
+
+        $this->mockGoogleDriver($googleUser);
+
+        $response = $this->withSession(['oauth.mobile' => true])
+            ->get('/auth/oauth/google/callback');
+
+        $response->assertRedirect();
+        $location = $response->headers->get('Location');
+        $this->assertStringStartsWith('netreverb://oauth-callback?', $location);
+
+        parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+        $this->assertSame('success', $query['status']);
+        $this->assertSame('google', $query['provider']);
+        $this->assertNotEmpty($query['token']);
+
+        // A real bearer token, not a browser session, should now work.
+        $this->getJson('/api/v1/me', ['Authorization' => "Bearer {$query['token']}"])
+            ->assertOk()
+            ->assertJsonPath('data.email', $user->email);
+    }
+
     public function test_google_oauth_updates_an_linked_users_name_from_the_provider_profile(): void
     {
         $user = User::factory()->create([
@@ -349,6 +385,62 @@ class AuthenticationApiTest extends TestCase
     }
 
     /** @param array{id: string, name: string, email: string, avatar: string} $attributes */
+    public function test_mobile_login_issues_a_bearer_token_instead_of_a_session(): void
+    {
+        $user = User::factory()->create(['email' => 'person@example.com']);
+
+        $this->postJson('/api/v1/auth/mobile/login', [
+            'email' => $user->email,
+            'password' => 'incorrect-password',
+            'device_name' => 'Pixel 6',
+        ])->assertUnprocessable()->assertJsonValidationErrors('email');
+
+        $response = $this->postJson('/api/v1/auth/mobile/login', [
+            'email' => $user->email,
+            'password' => 'password',
+            'device_name' => 'Pixel 6',
+        ])->assertOk()->assertJsonPath('data.email', $user->email);
+
+        $token = $response->json('token');
+        $this->assertIsString($token);
+        $this->assertNotEmpty($token);
+
+        // A bearer token from mobile login should authenticate /me without any session/cookie.
+        $this->getJson('/api/v1/me', ['Authorization' => "Bearer {$token}"])
+            ->assertOk()
+            ->assertJsonPath('data.email', $user->email);
+    }
+
+    public function test_mobile_logout_revokes_only_the_calling_devices_token(): void
+    {
+        $user = User::factory()->create();
+
+        $tokenA = $this->postJson('/api/v1/auth/mobile/login', [
+            'email' => $user->email,
+            'password' => 'password',
+            'device_name' => 'Pixel 6',
+        ])->assertOk()->json('token');
+
+        $tokenB = $this->postJson('/api/v1/auth/mobile/login', [
+            'email' => $user->email,
+            'password' => 'password',
+            'device_name' => 'iPhone 15',
+        ])->assertOk()->json('token');
+
+        $this->deleteJson('/api/v1/auth/mobile/logout', [], ['Authorization' => "Bearer {$tokenA}"])
+            ->assertNoContent();
+
+        // Sanctum's guard caches the resolved user for the lifetime of the guard
+        // instance (see Illuminate\Auth\RequestGuard::user()), and the test
+        // client reuses that instance across requests in one test method. Force
+        // a fresh guard so the next requests actually re-check the token against
+        // the database instead of returning the cached pre-logout user.
+        Auth::forgetGuards();
+
+        $this->getJson('/api/v1/me', ['Authorization' => "Bearer {$tokenA}"])->assertUnauthorized();
+        $this->getJson('/api/v1/me', ['Authorization' => "Bearer {$tokenB}"])->assertOk();
+    }
+
     private function fakeGoogleUser(array $attributes): \Laravel\Socialite\Contracts\User
     {
         return \Laravel\Socialite\Two\User::fake([

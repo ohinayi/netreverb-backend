@@ -2,13 +2,10 @@
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
-use App\Actions\Extensions\ProvisionVerifiedUserExtension;
-use App\Actions\Organizations\SyncOrganizationMemberFriendships;
+use App\Actions\Auth\FinalizeUserLogin;
 use App\Enums\AccountType;
-use App\Enums\MembershipStatus;
 use App\Exceptions\OAuthLoginException;
 use App\Http\Controllers\Controller;
-use App\Models\OrganizationMembership;
 use App\Models\SocialAccount;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
@@ -24,20 +21,21 @@ use Throwable;
 
 class OAuthController extends Controller
 {
-    public function __construct(
-        private ProvisionVerifiedUserExtension $provisionExtension,
-        private SyncOrganizationMemberFriendships $syncFriendships,
-    ) {}
+    public function __construct(private FinalizeUserLogin $finalizeLogin) {}
 
     public function redirect(Request $request, string $provider): RedirectResponse
     {
         $provider = $this->normalizeProvider($provider);
+        $isMobile = $request->boolean('mobile');
 
         if (! $this->providerIsEnabled($provider)) {
-            return $this->redirectToFrontendLogin('provider_disabled', $provider);
+            return $isMobile
+                ? $this->redirectToMobile(['status' => 'error', 'error' => 'provider_disabled', 'provider' => $provider])
+                : $this->redirectToFrontendLogin('provider_disabled', $provider);
         }
 
         $request->session()->put('oauth.redirect', $this->normalizeFrontendRedirect($request->query('redirect')));
+        $request->session()->put('oauth.mobile', $isMobile);
 
         return Socialite::driver($provider)->redirect();
     }
@@ -45,17 +43,24 @@ class OAuthController extends Controller
     public function callback(Request $request, string $provider): RedirectResponse
     {
         $provider = $this->normalizeProvider($provider);
+        $isMobile = (bool) $request->session()->pull('oauth.mobile', false);
 
         if (! $this->providerIsEnabled($provider)) {
-            return $this->redirectToFrontendLogin('provider_disabled', $provider);
+            return $isMobile
+                ? $this->redirectToMobile(['status' => 'error', 'error' => 'provider_disabled', 'provider' => $provider])
+                : $this->redirectToFrontendLogin('provider_disabled', $provider);
         }
 
         try {
             $socialiteUser = Socialite::driver($provider)->user();
         } catch (InvalidStateException) {
-            return $this->redirectToFrontendLogin('invalid_state', $provider);
+            return $isMobile
+                ? $this->redirectToMobile(['status' => 'error', 'error' => 'invalid_state', 'provider' => $provider])
+                : $this->redirectToFrontendLogin('invalid_state', $provider);
         } catch (Throwable) {
-            return $this->redirectToFrontendLogin('provider_error', $provider);
+            return $isMobile
+                ? $this->redirectToMobile(['status' => 'error', 'error' => 'provider_error', 'provider' => $provider])
+                : $this->redirectToFrontendLogin('provider_error', $provider);
         }
 
         try {
@@ -63,7 +68,20 @@ class OAuthController extends Controller
                 return $this->resolveUserForProvider($provider, $socialiteUser);
             });
         } catch (OAuthLoginException $exception) {
-            return $this->redirectToFrontendLogin($exception->errorCode, $provider);
+            return $isMobile
+                ? $this->redirectToMobile(['status' => 'error', 'error' => $exception->errorCode, 'provider' => $provider])
+                : $this->redirectToFrontendLogin($exception->errorCode, $provider);
+        }
+
+        if ($isMobile) {
+            $this->finalizeLogin->execute($user);
+            $token = $user->createToken('OAuth '.Str::ucfirst($provider))->plainTextToken;
+
+            return $this->redirectToMobile([
+                'status' => 'success',
+                'provider' => $provider,
+                'token' => $token,
+            ]);
         }
 
         $this->completeLogin($request, $user);
@@ -133,25 +151,7 @@ class OAuthController extends Controller
 
     private function completeLogin(Request $request, User $user): void
     {
-        $user->update(['last_login_at' => now()]);
-
-        if ($user->hasVerifiedEmail()) {
-            $memberships = OrganizationMembership::query()
-                ->whereBelongsTo($user)
-                ->where('status', MembershipStatus::Invited->value)
-                ->with('organization')
-                ->get();
-
-            foreach ($memberships as $membership) {
-                $membership->update([
-                    'status' => MembershipStatus::Active->value,
-                    'joined_at' => $membership->joined_at ?? now(),
-                ]);
-                $this->syncFriendships->execute($membership->organization, $user);
-            }
-        }
-
-        $this->provisionExtension->execute($user);
+        $this->finalizeLogin->execute($user);
 
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
@@ -332,5 +332,12 @@ class OAuthController extends Controller
             'oauth_error' => $errorCode,
             'provider' => $provider,
         ]));
+    }
+
+    private function redirectToMobile(array $query): RedirectResponse
+    {
+        return redirect()->away(
+            config('oauth.mobile_callback_scheme').'?'.http_build_query($query, encoding_type: PHP_QUERY_RFC3986),
+        );
     }
 }

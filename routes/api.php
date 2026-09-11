@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\CompleteOrganizationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
+use App\Http\Controllers\Api\V1\Auth\MobileAuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
@@ -78,6 +79,8 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
         ->middleware('throttle:password-recovery');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])
         ->middleware([StartSession::class, 'throttle:auth-login']);
+    Route::post('auth/mobile/login', [MobileAuthenticatedSessionController::class, 'store'])
+        ->middleware('throttle:auth-login');
     Route::post('auth/forgot-password', [PasswordResetController::class, 'store'])
         ->middleware('throttle:password-recovery');
     Route::post('auth/reset-password', [PasswordResetController::class, 'update'])
@@ -99,6 +102,7 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
         ));
         Route::delete('auth/logout', [AuthenticatedSessionController::class, 'destroy'])
             ->middleware(StartSession::class);
+        Route::delete('auth/mobile/logout', [MobileAuthenticatedSessionController::class, 'destroy']);
         Route::post('auth/organization', CompleteOrganizationController::class)
             ->middleware('throttle:auth-registration');
         Route::post('email/verification-notification', EmailVerificationNotificationController::class)
