@@ -41,4 +41,13 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    'fcm' => [
+        'project_id' => env('FCM_PROJECT_ID'),
+        // Path to the Firebase service-account JSON key (never committed to
+        // git) — used to mint short-lived OAuth2 access tokens for the FCM
+        // HTTP v1 API. Kept out of version control the same way the SMTP
+        // credentials are.
+        'credentials_path' => env('FCM_CREDENTIALS_PATH'),
+    ],
+
 ];
