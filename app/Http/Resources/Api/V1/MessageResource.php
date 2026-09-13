@@ -15,6 +15,9 @@ class MessageResource extends JsonResource
             'type' => $this->type?->value ?? $this->type,
             'body' => $this->body,
             'attachment_path' => $this->attachment_path,
+            'attachment_url' => ($this->attachment_path !== null && $this->attachment_path !== '')
+                ? route('messages.attachment.show', ['message' => $this->public_id])
+                : null,
             'metadata' => $this->metadata,
             'sent_at' => $this->sent_at,
             'created_at' => $this->sent_at,

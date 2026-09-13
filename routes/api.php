@@ -7,13 +7,13 @@ use App\Http\Controllers\Api\V1\Auth\CompleteOrganizationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\MobileAuthenticatedSessionController;
-use App\Http\Controllers\Api\V1\Mobile\DeviceTokenController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
 use App\Http\Controllers\Api\V1\CallLogNoteController;
 use App\Http\Controllers\Api\V1\CallQueueController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
+use App\Http\Controllers\Api\V1\CallRingbackAudioController;
 use App\Http\Controllers\Api\V1\CommunityController;
 use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
@@ -25,14 +25,15 @@ use App\Http\Controllers\Api\V1\FriendshipController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\LeadFollowUpController;
 use App\Http\Controllers\Api\V1\LiveKitTokenController;
+use App\Http\Controllers\Api\V1\MessageAttachmentController;
 use App\Http\Controllers\Api\V1\MessageController;
 use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
+use App\Http\Controllers\Api\V1\Mobile\DeviceTokenController;
 use App\Http\Controllers\Api\V1\NotificationController;
-use App\Http\Controllers\Api\V1\CallRingbackAudioController;
 use App\Http\Controllers\Api\V1\OrganizationController;
-use App\Http\Controllers\Api\V1\OrganizationRingbackAdController;
 use App\Http\Controllers\Api\V1\OrganizationIvrController;
+use App\Http\Controllers\Api\V1\OrganizationRingbackAdController;
 use App\Http\Controllers\Api\V1\OutboundCampaignController;
 use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
 use App\Http\Controllers\Api\V1\OutboundMessagingController;
@@ -52,6 +53,8 @@ use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
+use App\Http\Controllers\FreeSwitchDialplanController;
+use App\Http\Controllers\FreeSwitchDialplanRouterController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
@@ -59,16 +62,16 @@ use Illuminate\Support\Facades\Route;
 
 Route::match(['get', 'post'], 'freeswitch/callcenter.xml', FreeSwitchCallcenterConfigurationController::class)
     ->name('freeswitch.callcenter.configuration');
-Route::match(['get', 'post'], 'freeswitch/dialplan.xml', \App\Http\Controllers\FreeSwitchDialplanController::class)
+Route::match(['get', 'post'], 'freeswitch/dialplan.xml', FreeSwitchDialplanController::class)
     ->name('freeswitch.dialplan.configuration');
-Route::match(['get', 'post'], 'freeswitch/dialplan-router.xml', \App\Http\Controllers\FreeSwitchDialplanRouterController::class)
+Route::match(['get', 'post'], 'freeswitch/dialplan-router.xml', FreeSwitchDialplanRouterController::class)
     ->name('freeswitch.dialplan.router');
 
 Route::prefix('v1')->group(function (): void {
     Route::post('payments/webhooks/{provider}', PaymentWebhookController::class)
         ->middleware('throttle:240,1')
         ->name('payments.webhooks');
-Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
+    Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::class)
         ->middleware('throttle:120,1')
         ->name('outbound.webhooks.delivery');
     Route::post('conference-recordings/webhook', [ConferenceRecordingController::class, 'webhook'])
@@ -220,13 +223,18 @@ Route::post('outbound/webhooks/{provider}', OutboundDeliveryWebhookController::c
                 Route::post('conversations/{conversation}/messages/{message}/translate', [MessageTranslationController::class, 'store'])
                     ->middleware('throttle:message-translate')
                     ->name('conversations.messages.translate');
+                Route::post('conversations/{conversation}/attachments', [MessageAttachmentController::class, 'store'])
+                    ->middleware('throttle:message-send')
+                    ->name('conversations.attachments.store');
             });
+            Route::get('messages/{message}/attachment', [MessageAttachmentController::class, 'show'])
+                ->name('messages.attachment.show');
 
             Route::scopeBindings()->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
                 Route::get('organizations/{organization}/audit-events', [AuditEventController::class, 'index'])
                     ->name('organizations.audit-events.index');
-            Route::apiResource('organizations.call-queues', CallQueueController::class)
+                Route::apiResource('organizations.call-queues', CallQueueController::class)
                     ->only(['index', 'store', 'update', 'destroy'])
                     ->parameters(['call-queues' => 'callQueue']);
                 Route::apiResource('organizations.ivrs', OrganizationIvrController::class)
