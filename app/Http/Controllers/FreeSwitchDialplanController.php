@@ -10,12 +10,17 @@ use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
 use App\Services\Telephony\AiAssistantCallFlow;
+use App\Services\Telephony\PiperTtsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 
 class FreeSwitchDialplanController extends Controller
 {
-    public function __construct(private readonly AiAssistantCallFlow $aiAssistantCallFlow) {}
+    public function __construct(
+        private readonly AiAssistantCallFlow $aiAssistantCallFlow,
+        private readonly PiperTtsService $piper,
+    ) {}
 
     public function __invoke(Request $request)
     {
@@ -142,9 +147,7 @@ class FreeSwitchDialplanController extends Controller
             // Only reached if the bridge above never connected — a
             // successful call ends via the caller/callee hanging up, not by
             // falling through to here.
-            $unavailable = $extensionCondition->appendChild($xml->createElement('action'));
-            $unavailable->setAttribute('application', 'speak');
-            $unavailable->setAttribute('data', 'flite|slt|The person you are calling is currently unavailable. Please try again later.');
+            $this->appendUnavailableMessage($xml, $extensionCondition);
             $hangupAfterUnavailable = $extensionCondition->appendChild($xml->createElement('action'));
             $hangupAfterUnavailable->setAttribute('application', 'hangup');
             $hangupAfterUnavailable->setAttribute('data', 'NORMAL_CLEARING');
@@ -333,6 +336,42 @@ class FreeSwitchDialplanController extends Controller
         return $options;
     }
 
+    /**
+     * The same Piper neural-TTS voice used for IVR prompts and AI-assistant
+     * responses, not FreeSWITCH's built-in flite voice — generated once and
+     * cached on disk (the text never changes), so every later call just
+     * plays the same file back instead of re-synthesizing it.
+     */
+    private function appendUnavailableMessage(\DOMDocument $xml, \DOMElement $condition): void
+    {
+        $text = 'The person you are calling is currently unavailable. Please try again later.';
+        $relativePath = 'system-prompts/unavailable.wav';
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            $this->piper->generate($text, $relativePath);
+        }
+
+        if ($disk->exists($relativePath)) {
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($relativePath, '/')
+                : storage_path('app/public/'.$relativePath);
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'playback');
+            $action->setAttribute('data', $audioPath);
+
+            return;
+        }
+
+        // Piper isn't available on this box (or synthesis failed) - fall
+        // back to flite so the caller still hears something rather than
+        // silence.
+        $action = $condition->appendChild($xml->createElement('action'));
+        $action->setAttribute('application', 'speak');
+        $action->setAttribute('data', 'flite|slt|'.$text);
+    }
+
     private function appendDirectivePlayback(\DOMDocument $xml, \DOMElement $condition, OrganizationIvrOption $option): void
     {
         if ($option->directive_audio_path) {
@@ -434,9 +473,7 @@ class FreeSwitchDialplanController extends Controller
                 ));
 
                 // Only reached if the bridge above never connected.
-                $unavailable = $digitCondition->appendChild($xml->createElement('action'));
-                $unavailable->setAttribute('application', 'speak');
-                $unavailable->setAttribute('data', 'flite|slt|The person you are calling is currently unavailable. Please try again later.');
+                $this->appendUnavailableMessage($xml, $digitCondition);
                 $hangupAfterUnavailable = $digitCondition->appendChild($xml->createElement('action'));
                 $hangupAfterUnavailable->setAttribute('application', 'hangup');
                 $hangupAfterUnavailable->setAttribute('data', 'NORMAL_CLEARING');
