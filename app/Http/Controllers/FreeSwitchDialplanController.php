@@ -410,6 +410,17 @@ class FreeSwitchDialplanController extends Controller
                 $action->setAttribute('application', 'callcenter');
                 $action->setAttribute('data', 'nr_'.$destination.'@default');
             } else {
+                // Same fallback gap as the plain-extension dialplan branch
+                // above: without these two, a failed bridge (offline
+                // extension, no answer) just hung up with dead air - the
+                // key press looked like it "did nothing."
+                $continueOnFail = $digitCondition->appendChild($xml->createElement('action'));
+                $continueOnFail->setAttribute('application', 'set');
+                $continueOnFail->setAttribute('data', 'continue_on_fail=true');
+                $noAutoHangup = $digitCondition->appendChild($xml->createElement('action'));
+                $noAutoHangup->setAttribute('application', 'set');
+                $noAutoHangup->setAttribute('data', 'hangup_after_bridge=false');
+
                 $action->setAttribute('application', 'bridge');
                 // Browser extensions are registered through Kamailio
                 // on the external profile. `user/<extension>` looks
@@ -421,6 +432,14 @@ class FreeSwitchDialplanController extends Controller
                     config('telephony.sip_server'),
                     (int) config('telephony.sip_port'),
                 ));
+
+                // Only reached if the bridge above never connected.
+                $unavailable = $digitCondition->appendChild($xml->createElement('action'));
+                $unavailable->setAttribute('application', 'speak');
+                $unavailable->setAttribute('data', 'flite|slt|The person you are calling is currently unavailable. Please try again later.');
+                $hangupAfterUnavailable = $digitCondition->appendChild($xml->createElement('action'));
+                $hangupAfterUnavailable->setAttribute('application', 'hangup');
+                $hangupAfterUnavailable->setAttribute('data', 'NORMAL_CLEARING');
             }
         }
     }
