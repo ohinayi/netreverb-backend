@@ -117,6 +117,19 @@ class FreeSwitchDialplanController extends Controller
             $extensionCondition = $extension->appendChild($xml->createElement('condition'));
             $extensionCondition->setAttribute('field', 'destination_number');
             $extensionCondition->setAttribute('expression', '^'.preg_quote($number, '/').'$');
+
+            // Without these two, a failed bridge (offline/unregistered
+            // extension, no answer, busy) just hangs the call up with
+            // whatever raw SIP error came back — the caller hears dead air
+            // instead of anything explaining what happened. Setting both
+            // lets execution fall through to the actions below instead.
+            $continueOnFail = $extensionCondition->appendChild($xml->createElement('action'));
+            $continueOnFail->setAttribute('application', 'set');
+            $continueOnFail->setAttribute('data', 'continue_on_fail=true');
+            $noAutoHangup = $extensionCondition->appendChild($xml->createElement('action'));
+            $noAutoHangup->setAttribute('application', 'set');
+            $noAutoHangup->setAttribute('data', 'hangup_after_bridge=false');
+
             $bridge = $extensionCondition->appendChild($xml->createElement('action'));
             $bridge->setAttribute('application', 'bridge');
             $bridge->setAttribute('data', sprintf(
@@ -125,6 +138,16 @@ class FreeSwitchDialplanController extends Controller
                 config('telephony.sip_server'),
                 (int) config('telephony.sip_port'),
             ));
+
+            // Only reached if the bridge above never connected — a
+            // successful call ends via the caller/callee hanging up, not by
+            // falling through to here.
+            $unavailable = $extensionCondition->appendChild($xml->createElement('action'));
+            $unavailable->setAttribute('application', 'speak');
+            $unavailable->setAttribute('data', 'flite|slt|The person you are calling is currently unavailable. Please try again later.');
+            $hangupAfterUnavailable = $extensionCondition->appendChild($xml->createElement('action'));
+            $hangupAfterUnavailable->setAttribute('application', 'hangup');
+            $hangupAfterUnavailable->setAttribute('data', 'NORMAL_CLEARING');
 
             return response($xml->saveXML(), 200, ['Content-Type' => 'text/xml; charset=UTF-8']);
         }
