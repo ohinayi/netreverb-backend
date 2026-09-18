@@ -8,5 +8,6 @@ enum ServiceNumberType: string
     case Conference = 'conference';
     case Voicemail = 'voicemail';
     case Assistant = 'assistant';
+    case Ivr = 'ivr';
     case Custom = 'custom';
 }
