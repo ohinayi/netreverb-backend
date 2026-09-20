@@ -344,6 +344,16 @@ class FreeSwitchDialplanController extends Controller
      */
     private function appendUnavailableMessage(\DOMDocument $xml, \DOMElement $condition): void
     {
+        // Without an explicit answer, FreeSWITCH only pre-answers (183
+        // early media) to play the message - the call never reaches a real
+        // 200 OK. A caller's SIP client (this app's own web/mobile included)
+        // then sees the whole INVITE end without ever having been accepted,
+        // and reports it as a rejected call instead of playing the message
+        // through - "please wait... then it just stopped," never actually
+        // heard.
+        $answer = $condition->appendChild($xml->createElement('action'));
+        $answer->setAttribute('application', 'answer');
+
         $text = 'The person you are calling is currently unavailable. Please try again later.';
         $relativePath = 'system-prompts/unavailable.wav';
         $disk = Storage::disk('public');
