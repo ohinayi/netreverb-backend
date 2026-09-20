@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Auth\CompleteOrganizationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Api\V1\Auth\MobileAuthenticatedSessionController;
+use App\Http\Controllers\Api\V1\Auth\MobileRegisteredUserController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Auth\RegisteredUserController;
 use App\Http\Controllers\Api\V1\CallLogController;
@@ -80,6 +81,8 @@ Route::prefix('v1')->group(function (): void {
         ->name('conference-recordings.webhook');
     Route::post('auth/register', RegisteredUserController::class)
         ->middleware([StartSession::class, 'throttle:auth-registration']);
+    Route::post('auth/mobile/register', [MobileRegisteredUserController::class, 'store'])
+        ->middleware('throttle:auth-registration');
     Route::post('auth/resend-verification', EmailVerificationNotificationController::class)
         ->middleware('throttle:password-recovery');
     Route::post('auth/login', [AuthenticatedSessionController::class, 'store'])

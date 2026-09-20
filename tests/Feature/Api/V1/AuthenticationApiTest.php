@@ -411,6 +411,43 @@ class AuthenticationApiTest extends TestCase
             ->assertJsonPath('data.email', $user->email);
     }
 
+    public function test_mobile_registration_issues_a_bearer_token_and_creates_an_unverified_individual_workspace(): void
+    {
+        Notification::fake();
+
+        $response = $this->postJson('/api/v1/auth/mobile/register', $this->registrationPayload())
+            ->assertCreated()
+            ->assertJsonPath('data.email', 'person@example.com')
+            ->assertJsonPath('data.email_verified', false);
+
+        $token = $response->json('token');
+        $this->assertIsString($token);
+        $this->assertNotEmpty($token);
+
+        $user = User::query()->sole();
+        $organization = Organization::query()->sole();
+
+        $this->assertNull($user->email_verified_at);
+        $this->assertSame('individual', $organization->settings['kind']);
+        $this->assertDatabaseCount((new Extension)->getTable(), 0);
+        Notification::assertSentTo($user, VerifyEmailNotification::class);
+
+        // The token works immediately, no session/cookie needed.
+        $this->getJson('/api/v1/me', ['Authorization' => "Bearer {$token}"])
+            ->assertOk()
+            ->assertJsonPath('data.email', $user->email);
+    }
+
+    public function test_mobile_registration_requires_a_device_name(): void
+    {
+        $payload = $this->registrationPayload();
+        unset($payload['device_name']);
+
+        $this->postJson('/api/v1/auth/mobile/register', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('device_name');
+    }
+
     public function test_mobile_logout_revokes_only_the_calling_devices_token(): void
     {
         $user = User::factory()->create();
