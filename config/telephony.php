@@ -43,15 +43,21 @@ return [
         // are reasonable defaults but genuinely need tuning against the
         // live FreeSWITCH box/codec rather than trusted blindly.
         'record_max_seconds' => (int) env('AI_ASSISTANT_RECORD_MAX_SECONDS', 20),
-        // Raised from 200/3 (2026-09-20) - a caller reported 5-10s of dead
-        // air between finishing speaking and anything happening, wanting
-        // ~3s. A too-low threshold makes ordinary line noise/hiss keep
-        // resetting the silence-hit counter instead of ever counting as
-        // silence, which stretches this out well past what silence_hits
-        // alone would suggest. Genuinely needs live-call verification, not
-        // just a config-file guess - tune further against a real call if
-        // it's still not close to 3s.
-        'record_silence_threshold' => (int) env('AI_ASSISTANT_RECORD_SILENCE_THRESHOLD', 300),
+        // Raised again from 300/2 (2026-09-20, same day) - still too long
+        // in a caller's live test, reported as feeling like it's "listening
+        // for any other sound" i.e. never confidently deciding they've
+        // stopped talking in anything but a dead-silent room. A too-low
+        // threshold makes ordinary background noise (traffic, a fan, room
+        // hum) keep resetting the silence-hit counter instead of ever
+        // counting as silence, which stretches this out well past what
+        // silence_hits alone would suggest - raising the threshold makes a
+        // WIDER range of ambient levels count as "quiet enough," which is
+        // what actually helps in a real, non-silent room. This still
+        // genuinely needs live-call verification against real background
+        // noise, not just a config-file guess - if it's now cutting people
+        // off mid-sentence instead, threshold is too high and needs to come
+        // back down some.
+        'record_silence_threshold' => (int) env('AI_ASSISTANT_RECORD_SILENCE_THRESHOLD', 450),
         'record_silence_hits' => (int) env('AI_ASSISTANT_RECORD_SILENCE_HITS', 2),
         'max_retries' => (int) env('AI_ASSISTANT_MAX_RETRIES', 2),
         // How long the caller's wait-tone loop keeps polling
