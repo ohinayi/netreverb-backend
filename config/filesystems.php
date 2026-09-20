@@ -73,6 +73,19 @@ return [
             ],
         ],
 
+        'freeswitch_voicemails' => [
+            'driver' => 'local',
+            'root' => env('VOICEMAIL_RECORDINGS_PATH', storage_path('app/public/recordings/voicemail')),
+            'serve' => false,
+            'throw' => false,
+            'report' => false,
+            'visibility' => 'public',
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0600],
+                'dir' => ['public' => 0775, 'private' => 0700],
+            ],
+        ],
+
         'ai_assistant_recordings' => [
             'driver' => 'local',
             // FreeSWITCH's `record` application writes here directly using a

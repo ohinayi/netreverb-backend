@@ -59,6 +59,11 @@ Schedule::job(new ExpireStaleAiAssistantSessions)
     ->onOneServer()
     ->withoutOverlapping();
 
+Schedule::command('voicemail:import')
+    ->everyMinute()
+    ->onOneServer()
+    ->withoutOverlapping();
+
 Schedule::command('leads:dispatch-follow-up-reminders')
     ->everyMinute()
     ->onOneServer()

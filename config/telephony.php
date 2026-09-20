@@ -60,6 +60,25 @@ return [
             'password' => env('AI_ASSISTANT_RECORDINGS_SYNC_PASSWORD', env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD')),
         ],
     ],
+    'voicemail' => [
+        'disk' => env('VOICEMAIL_RECORDINGS_DISK', 'freeswitch_voicemails'),
+        // Same convention as ai_assistant.base_path above - this must be a
+        // real path on the FreeSWITCH box, since FreeSWITCH's own `record`
+        // application writes here directly using a plain filesystem path.
+        'base_path' => env('VOICEMAIL_RECORDINGS_BASE_PATH', '/usr/local/freeswitch/var/lib/freeswitch/recordings/voicemail'),
+        'record_max_seconds' => (int) env('VOICEMAIL_RECORD_MAX_SECONDS', 120),
+        'record_silence_threshold' => (int) env('VOICEMAIL_RECORD_SILENCE_THRESHOLD', 200),
+        'record_silence_hits' => (int) env('VOICEMAIL_RECORD_SILENCE_HITS', 4),
+        'remote_fetch' => [
+            // See ai_assistant.remote_fetch above - off in production
+            // (same-VPS direct read), on for local dev against the
+            // shared VPS FreeSWITCH box.
+            'enabled' => env('VOICEMAIL_RECORDINGS_REMOTE_FETCH_ENABLED', false),
+            'host' => env('VOICEMAIL_RECORDINGS_SYNC_HOST', env('FREESWITCH_CALL_RECORDINGS_SYNC_HOST', 'sip.classyra.com.ng')),
+            'user' => env('VOICEMAIL_RECORDINGS_SYNC_USER', env('FREESWITCH_CALL_RECORDINGS_SYNC_USER', 'deploy')),
+            'password' => env('VOICEMAIL_RECORDINGS_SYNC_PASSWORD', env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD')),
+        ],
+    ],
     'call_recordings' => [
         'disk' => env('FREESWITCH_CALL_RECORDINGS_DISK', 'freeswitch_call_recordings'),
         'base_path' => env('FREESWITCH_CALL_RECORDINGS_BASE_PATH', env('FREESWITCH_CALL_RECORDINGS_DIR', storage_path('app/public/recordings/calls'))),

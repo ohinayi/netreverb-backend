@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
@@ -186,5 +187,54 @@ class FreeSwitchIvrDialplanTest extends TestCase
         $this->assertStringContainsString('ringback=', $xml);
         $this->assertStringContainsString('pool-ad.wav', $xml);
         $this->assertStringNotContainsString('ringback-audio/own/hold.wav', $xml);
+    }
+
+    public function test_a_voicemail_option_records_into_the_target_extensions_mailbox(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $extension = Extension::factory()->for($organization)->create()->load('dialableNumber');
+        $ivr = OrganizationIvr::create([
+            'organization_id' => $organization->id, 'name' => 'Support', 'enabled' => true,
+        ]);
+        OrganizationIvrOption::create([
+            'organization_ivr_id' => $ivr->id, 'digit' => '2', 'label' => 'Leave a message',
+            'destination_type' => 'voicemail', 'destination' => $extension->dialableNumber->number, 'enabled' => true,
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='
+                .'ivr-options-'.$ivr->public_id.'&destination_number=2'
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('application="answer"', $xml);
+        $this->assertStringContainsString('application="record"', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+        $this->assertStringContainsString('application="hangup"', $xml);
+    }
+
+    public function test_a_voicemail_option_pointing_at_an_unknown_extension_speaks_unavailable_instead_of_recording(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $ivr = OrganizationIvr::create([
+            'organization_id' => $organization->id, 'name' => 'Support', 'enabled' => true,
+        ]);
+        OrganizationIvrOption::create([
+            'organization_ivr_id' => $ivr->id, 'digit' => '2', 'label' => 'Leave a message',
+            'destination_type' => 'voicemail', 'destination' => '000000', 'enabled' => true,
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='
+                .'ivr-options-'.$ivr->public_id.'&destination_number=2'
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringNotContainsString('application="record"', $xml);
+        $this->assertStringContainsString('application="hangup"', $xml);
     }
 }

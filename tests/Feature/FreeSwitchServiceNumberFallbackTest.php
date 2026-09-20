@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\ServiceNumberType;
+use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\RingbackAd;
 use App\Models\ServiceNumber;
@@ -57,6 +58,45 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
         $this->assertStringContainsString('application="hangup"', $xml);
     }
 
+    public function test_a_voicemail_type_service_number_records_into_its_mailbox_extension(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $extension = Extension::factory()->for($organization)->create();
+        $service = ServiceNumber::factory()->for($organization)->create([
+            'type' => ServiceNumberType::Voicemail,
+            'configuration' => ['mailbox_extension_id' => $extension->public_id],
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('application="record"', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+    }
+
+    public function test_a_service_number_pointing_at_a_missing_mailbox_extension_speaks_unavailable_instead_of_dead_air(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $service = ServiceNumber::factory()->for($organization)->create([
+            'type' => ServiceNumberType::Voicemail,
+            'configuration' => ['mailbox_extension_id' => 'does-not-exist'],
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('temporarily unavailable', $xml);
+        $this->assertStringContainsString('application="hangup"', $xml);
+    }
+
     public function test_a_direct_service_number_bridge_sets_ringback_before_the_bridge_when_the_ad_exempt_org_has_custom_audio(): void
     {
         $this->allowXmlCurl();
@@ -98,6 +138,41 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
 
         $response->assertOk();
         $this->assertStringNotContainsString('ringback=', $response->getContent());
+    }
+
+    public function test_a_plain_extension_configured_for_voicemail_records_instead_of_speaking_unavailable(): void
+    {
+        $this->allowXmlCurl();
+        $extension = Extension::factory()->create([
+            'unavailable_action' => 'voicemail',
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$extension->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('application="record"', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+        $this->assertStringNotContainsString('currently unavailable', $xml);
+    }
+
+    public function test_a_plain_extension_without_voicemail_configured_still_speaks_the_generic_unavailable_message(): void
+    {
+        $this->allowXmlCurl();
+        $extension = Extension::factory()->create([
+            'unavailable_action' => 'end_call',
+        ])->load('dialableNumber');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$extension->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringNotContainsString('application="record"', $xml);
+        $this->assertStringContainsString('application="hangup"', $xml);
     }
 
     public function test_a_direct_service_number_bridge_plays_a_pool_ad_for_a_non_exempt_org_instead_of_its_own_audio(): void

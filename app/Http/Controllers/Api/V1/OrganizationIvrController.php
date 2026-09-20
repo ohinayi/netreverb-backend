@@ -181,7 +181,7 @@ class OrganizationIvrController extends Controller
             }
 
             $type = (string) ($raw['destination_type'] ?? '');
-            if (! in_array($type, ['extension', 'queue', 'conference', 'external', 'announcement', 'hangup', 'submenu', 'directive'], true)) {
+            if (! in_array($type, ['extension', 'queue', 'conference', 'external', 'announcement', 'hangup', 'submenu', 'directive', 'voicemail'], true)) {
                 throw ValidationException::withMessages(["{$path}.destination_type" => 'Select a valid option type.']);
             }
 

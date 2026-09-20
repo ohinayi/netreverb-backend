@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
 use App\Http\Controllers\Api\V1\OutboundMessagingController;
 use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use App\Http\Controllers\Api\V1\RecordingController;
+use App\Http\Controllers\Api\V1\VoicemailController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
@@ -348,6 +349,14 @@ Route::prefix('v1')->group(function (): void {
                     ->name('organizations.notes.index');
                 Route::get('organizations/{organization}/recordings', [RecordingController::class, 'index'])
                     ->name('organizations.recordings.index');
+                Route::get('organizations/{organization}/voicemails', [VoicemailController::class, 'index'])
+                    ->name('organizations.voicemails.index');
+                Route::get('organizations/{organization}/voicemails/{voicemail}/audio', [VoicemailController::class, 'show'])
+                    ->name('organizations.voicemails.audio');
+                Route::post('organizations/{organization}/voicemails/{voicemail}/listened', [VoicemailController::class, 'markListened'])
+                    ->name('organizations.voicemails.listened');
+                Route::delete('organizations/{organization}/voicemails/{voicemail}', [VoicemailController::class, 'destroy'])
+                    ->name('organizations.voicemails.destroy');
                 Route::patch('organizations/{organization}/tickets/bulk', [TicketController::class, 'bulkUpdate'])
                     ->name('organizations.tickets.bulk');
                 Route::apiResource('organizations.tickets', TicketController::class);

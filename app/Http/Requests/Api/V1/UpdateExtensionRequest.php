@@ -41,7 +41,7 @@ class UpdateExtensionRequest extends FormRequest
                 'string',
                 Rule::exists((new User)->getTable(), 'public_id'),
             ],
-            'unavailable_action' => ['sometimes', Rule::in(['return_to_sender', 'forward_to_extension', 'end_call'])],
+            'unavailable_action' => ['sometimes', Rule::in(['return_to_sender', 'forward_to_extension', 'end_call', 'voicemail'])],
             'fallback_extension_id' => ['sometimes', 'nullable', 'string', Rule::exists((new Extension)->getTable(), 'public_id')],
             'ring_timeout_seconds' => ['sometimes', 'integer', 'min:10', 'max:60'],
         ];

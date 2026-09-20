@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ServiceNumberType;
 use App\Models\AiAssistant;
 use App\Models\ConferenceRoom;
+use App\Models\Extension;
 use App\Models\Organization;
 use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
@@ -99,6 +100,10 @@ class FreeSwitchDialplanController extends Controller
         $assistant = $assistantId
             ? AiAssistant::query()->with('fields')->where('organization_id', $service->organization_id)->where('public_id', $assistantId)->where('enabled', true)->first()
             : null;
+        $voicemailExtensionId = $service?->type === ServiceNumberType::Voicemail ? data_get($service->configuration, 'mailbox_extension_id') : null;
+        $voicemailExtension = $voicemailExtensionId
+            ? Extension::query()->where('organization_id', $service->organization_id)->where('public_id', $voicemailExtensionId)->first()
+            : null;
 
         $xml = new \DOMDocument('1.0', 'UTF-8');
         $document = $xml->appendChild($xml->createElement('document'));
@@ -146,8 +151,16 @@ class FreeSwitchDialplanController extends Controller
 
             // Only reached if the bridge above never connected — a
             // successful call ends via the caller/callee hanging up, not by
-            // falling through to here.
-            $this->appendUnavailableMessage($xml, $extensionCondition);
+            // falling through to here. unavailable_action is only ever read
+            // here for its 'voicemail' value — return_to_sender/
+            // forward_to_extension are stored via the API but have no
+            // dialplan behavior yet (pre-existing gap, out of scope here).
+            $calleeExtension = Extension::query()->whereHas('dialableNumber', fn ($q) => $q->where('number', $number))->first();
+            if ($calleeExtension && $calleeExtension->unavailable_action === 'voicemail') {
+                $this->appendVoicemailRecording($xml, $extensionCondition, $calleeExtension);
+            } else {
+                $this->appendUnavailableMessage($xml, $extensionCondition);
+            }
             $hangupAfterUnavailable = $extensionCondition->appendChild($xml->createElement('action'));
             $hangupAfterUnavailable->setAttribute('application', 'hangup');
             $hangupAfterUnavailable->setAttribute('data', 'NORMAL_CLEARING');
@@ -179,11 +192,17 @@ class FreeSwitchDialplanController extends Controller
             }
         } elseif ($assistant) {
             $this->aiAssistantCallFlow->emitEntry($xml, $condition, $assistant);
-        } elseif ($assistantId || ($ivrId && ! $ivr)) {
-            // The service number is wired to an assistant or IVR that's
-            // since been disabled or deleted. Say so instead of leaving the
-            // caller in dead air - the flow never even started, so there's
-            // no in-progress call to fail partway through.
+        } elseif ($voicemailExtension) {
+            $this->appendVoicemailRecording($xml, $condition, $voicemailExtension);
+            $hangup = $condition->appendChild($xml->createElement('action'));
+            $hangup->setAttribute('application', 'hangup');
+            $hangup->setAttribute('data', 'NORMAL_CLEARING');
+        } elseif ($assistantId || ($ivrId && ! $ivr) || ($voicemailExtensionId && ! $voicemailExtension)) {
+            // The service number is wired to an assistant, IVR, or mailbox
+            // extension that's since been disabled or deleted. Say so
+            // instead of leaving the caller in dead air - the flow never
+            // even started, so there's no in-progress call to fail partway
+            // through.
             $unavailable = $condition->appendChild($xml->createElement('action'));
             $unavailable->setAttribute('application', 'speak');
             $unavailable->setAttribute('data', 'flite|slt|This service is temporarily unavailable. Please try again later.');
@@ -382,6 +401,65 @@ class FreeSwitchDialplanController extends Controller
         $action->setAttribute('data', 'flite|slt|'.$text);
     }
 
+    /**
+     * Plays a mailbox greeting, then records the caller's message straight
+     * to a path FreeSWITCH writes on its own disk (mirrors the
+     * `ai_assistant` record pattern). `${strftime(...)}`/`${caller_id_number}`
+     * are FreeSWITCH channel-variable expansions, not PHP - they're
+     * resolved when this action actually runs, not when this XML is built.
+     * The extension's own public_id (not its number) names the folder so
+     * the later sync/import step can resolve the mailbox owner without a
+     * database round-trip mid-call.
+     */
+    private function appendVoicemailRecording(\DOMDocument $xml, \DOMElement $condition, Extension $extension): void
+    {
+        $answer = $condition->appendChild($xml->createElement('action'));
+        $answer->setAttribute('application', 'answer');
+
+        $greetingText = sprintf(
+            'You have reached %s. Please leave a message after the tone, then hang up.',
+            $extension->display_name !== '' ? $extension->display_name : 'this mailbox',
+        );
+        $relativePath = 'voicemail-greetings/'.$extension->public_id.'.wav';
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            $this->piper->generate($greetingText, $relativePath);
+        }
+
+        if ($disk->exists($relativePath)) {
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($relativePath, '/')
+                : storage_path('app/public/'.$relativePath);
+            $greeting = $condition->appendChild($xml->createElement('action'));
+            $greeting->setAttribute('application', 'playback');
+            $greeting->setAttribute('data', $audioPath);
+        } else {
+            $greeting = $condition->appendChild($xml->createElement('action'));
+            $greeting->setAttribute('application', 'speak');
+            $greeting->setAttribute('data', 'flite|slt|'.$greetingText);
+        }
+
+        $beep = $condition->appendChild($xml->createElement('action'));
+        $beep->setAttribute('application', 'playback');
+        $beep->setAttribute('data', 'tone_stream://%(300,200,1400)');
+
+        $recordPath = rtrim((string) config('telephony.voicemail.base_path'), '/')
+            .'/'.$extension->public_id
+            .'/${strftime(%Y%m%d-%H%M%S)}_${caller_id_number}.wav';
+        $record = $condition->appendChild($xml->createElement('action'));
+        $record->setAttribute('application', 'record');
+        // record syntax: path, time_limit_secs, silence_thresh, silence_hits.
+        $record->setAttribute('data', sprintf(
+            '%s %d %d %d',
+            $recordPath,
+            (int) config('telephony.voicemail.record_max_seconds', 120),
+            (int) config('telephony.voicemail.record_silence_threshold', 200),
+            (int) config('telephony.voicemail.record_silence_hits', 4),
+        ));
+    }
+
     private function appendDirectivePlayback(\DOMDocument $xml, \DOMElement $condition, OrganizationIvrOption $option): void
     {
         if ($option->directive_audio_path) {
@@ -441,6 +519,22 @@ class FreeSwitchDialplanController extends Controller
 
             if ($type === 'directive') {
                 $this->appendDirectivePlayback($xml, $digitCondition, $option);
+                $hangup = $digitCondition->appendChild($xml->createElement('action'));
+                $hangup->setAttribute('application', 'hangup');
+                $hangup->setAttribute('data', 'NORMAL_CLEARING');
+
+                continue;
+            }
+
+            if ($type === 'voicemail') {
+                $mailboxExtension = $organization
+                    ? Extension::query()->where('organization_id', $organization->id)->whereHas('dialableNumber', fn ($q) => $q->where('number', $destination))->first()
+                    : null;
+                if ($mailboxExtension) {
+                    $this->appendVoicemailRecording($xml, $digitCondition, $mailboxExtension);
+                } else {
+                    $this->appendUnavailableMessage($xml, $digitCondition);
+                }
                 $hangup = $digitCondition->appendChild($xml->createElement('action'));
                 $hangup->setAttribute('application', 'hangup');
                 $hangup->setAttribute('data', 'NORMAL_CLEARING');
