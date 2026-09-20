@@ -195,16 +195,19 @@ class AiAssistantCallFlow
     }
 
     /**
-     * First hit for this answer dispatches the background job and starts
-     * waiting; every hit after that (including this first one) just plays a
-     * short tone and re-fetches this same context a moment later, until
-     * answer_ready_at shows up. A stuck/crashed job can't strand the caller
-     * forever - past answer_processing_timeout_seconds this gives up and
-     * treats it exactly like an empty/failed answer.
+     * First hit for this answer dispatches the background job, speaks
+     * "one moment" once, and starts waiting; every hit after that just
+     * plays a short tone (not the phrase again) and re-fetches this same
+     * context a moment later, until answer_ready_at shows up. A stuck/
+     * crashed job can't strand the caller forever - past
+     * answer_processing_timeout_seconds this gives up and treats it
+     * exactly like an empty/failed answer.
      */
     private function waitForBackgroundAnswer(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): \DOMDocument
     {
-        if ($session->answer_processing_started_at === null) {
+        $isFirstWait = $session->answer_processing_started_at === null;
+
+        if ($isFirstWait) {
             $session->update(['answer_processing_started_at' => now()]);
             ProcessLiveAiAssistantAnswer::dispatch($session->id)->onQueue('ai');
         } elseif ($this->answerProcessingTimedOut($session)) {
@@ -217,7 +220,7 @@ class AiAssistantCallFlow
             return $xml;
         }
 
-        $this->appendWaitMessage($xml, $condition, $session);
+        $this->appendWaitMessage($xml, $condition, $session, $isFirstWait);
 
         return $xml;
     }
@@ -231,17 +234,31 @@ class AiAssistantCallFlow
     }
 
     /**
-     * A short spoken phrase instead of a tone - live-tested feedback found
-     * a beep/chime unpleasant. Uses the same Piper voice and caching
-     * pattern as appendUnavailableMessage (generated once, reused for
-     * every caller/session, not per-call). Has to loop every ~1.5-2s
-     * without feeling like the assistant is stuck repeating itself.
-     * Filling this gap matters: without it, FreeSWITCH just sits on our
-     * HTTP response with nothing playing at all, and a caller mid-call
-     * with dead air reasonably assumes the line dropped.
+     * Speaks "One moment, please." exactly once (the first wait re-fetch
+     * for this answer), then a short soft tone on every re-fetch after
+     * that - live-tested feedback found the phrase repeating on every
+     * ~1s poll ("one moment, please... one moment, please...") more
+     * annoying than a beep would ever be. Uses the same Piper voice and
+     * caching pattern as appendUnavailableMessage (generated once, reused
+     * for every caller/session, not per-call). Filling this gap matters:
+     * without it, FreeSWITCH just sits on our HTTP response with nothing
+     * playing at all, and a caller mid-call with dead air reasonably
+     * assumes the line dropped.
      */
-    private function appendWaitMessage(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
+    private function appendWaitMessage(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, bool $isFirstWait): void
     {
+        if (! $isFirstWait) {
+            $tone = $condition->appendChild($xml->createElement('action'));
+            $tone->setAttribute('application', 'playback');
+            $tone->setAttribute('data', 'tone_stream://%(300,200,440,480)');
+            $sleep = $condition->appendChild($xml->createElement('action'));
+            $sleep->setAttribute('application', 'sleep');
+            $sleep->setAttribute('data', '400');
+            $this->appendTransfer($xml, $condition, 'continue', self::ANSWER_CONTEXT_PREFIX.$session->public_id);
+
+            return;
+        }
+
         $text = 'One moment, please.';
         $relativePath = 'system-prompts/ai-assistant-wait.wav';
         $disk = Storage::disk('public');
