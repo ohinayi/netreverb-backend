@@ -123,6 +123,21 @@ class AiAssistantCallFlow
             return $this->respond($xml);
         }
 
+        // Skips the read-back-and-confirm round trip entirely for fields an
+        // org has marked as trusted - a real extracted value goes straight
+        // into captured_data and the call moves on to the next question, no
+        // "you said X, press 1 to confirm" and no digit wait. Only applies
+        // once extraction actually succeeded above; an empty/failed answer
+        // still falls through to the normal redo-or-skip handling either way.
+        if ($field->skip_confirmation) {
+            $captured = $session->captured_data ?? [];
+            $captured[$field->key] = (string) $value;
+            $session->update(['captured_data' => $captured, 'pending_value' => null, 'retry_count' => 0]);
+            $this->advanceToNextFieldOrFinish($xml, $condition, $session);
+
+            return $this->respond($xml);
+        }
+
         $session->update(['pending_value' => (string) $value]);
         // The caller's actual captured value can't be pre-cached (it's
         // unknown until they say it), but Piper is fast enough to run

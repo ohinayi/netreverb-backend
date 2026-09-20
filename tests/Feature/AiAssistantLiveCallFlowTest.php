@@ -300,6 +300,65 @@ class AiAssistantLiveCallFlowTest extends TestCase
         $this->assertSame('completed', $session->status);
     }
 
+    public function test_a_skip_confirmation_field_captures_the_answer_and_advances_without_a_confirm_step(): void
+    {
+        Storage::fake('ai_assistant_recordings');
+        $this->allowXmlCurl();
+        $this->fakeAiProviders('my name is Abdul', 'Abdul');
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create(['organization_id' => $organization->id, 'name' => 'Intake', 'enabled' => true, 'closing_message' => 'Bye.']);
+        AiAssistantField::query()->create([
+            'ai_assistant_id' => $assistant->id, 'key' => 'name', 'label' => 'Name',
+            'question' => 'What is your name?', 'skip_confirmation' => true, 'sort_order' => 0,
+        ]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'name', 'started_at' => now(),
+        ]);
+        $this->putFakeRecording($session, 'name');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
+        )->assertOk();
+
+        $xml = $response->getContent();
+        $this->assertStringNotContainsString(AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX, $xml);
+        $this->assertStringNotContainsString('Press 1 to confirm', $xml);
+        $this->assertStringContainsString('Bye.', $xml);
+        $this->assertStringContainsString('application="hangup"', $xml);
+
+        $session->refresh();
+        $this->assertSame(['name' => 'Abdul'], $session->captured_data);
+        $this->assertSame('completed', $session->status);
+    }
+
+    public function test_a_failed_extraction_still_redoes_even_when_the_field_skips_confirmation(): void
+    {
+        Storage::fake('ai_assistant_recordings');
+        $this->allowXmlCurl();
+        $this->fakeAiProviders('mumble mumble', null);
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create(['organization_id' => $organization->id, 'name' => 'Intake', 'enabled' => true]);
+        AiAssistantField::query()->create([
+            'ai_assistant_id' => $assistant->id, 'key' => 'name', 'label' => 'Name',
+            'question' => 'What is your name?', 'skip_confirmation' => true, 'sort_order' => 0,
+        ]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'name', 'started_at' => now(),
+        ]);
+        $this->putFakeRecording($session, 'name');
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
+        )->assertOk();
+
+        $this->assertStringContainsString('What is your name?', $response->getContent());
+        $session->refresh();
+        $this->assertSame(1, $session->retry_count);
+        $this->assertNull($session->captured_data);
+    }
+
     public function test_an_invalid_boolean_digit_triggers_a_redo_without_touching_transcription_or_extraction(): void
     {
         $this->allowXmlCurl();

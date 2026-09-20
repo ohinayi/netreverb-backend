@@ -17,6 +17,7 @@ class AiAssistantFieldResource extends JsonResource
             'field_type' => $this->field_type,
             'question' => $this->question,
             'required' => $this->required,
+            'skip_confirmation' => $this->skip_confirmation,
             'options' => $this->options,
             'sort_order' => $this->sort_order,
         ];

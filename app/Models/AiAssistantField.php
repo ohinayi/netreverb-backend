@@ -10,9 +10,9 @@ class AiAssistantField extends Model
 {
     use HasUlids;
 
-    protected $fillable = ['ai_assistant_id', 'key', 'label', 'field_type', 'question', 'question_audio_path', 'confirm_prefix_audio_path', 'required', 'options', 'sort_order'];
+    protected $fillable = ['ai_assistant_id', 'key', 'label', 'field_type', 'question', 'question_audio_path', 'confirm_prefix_audio_path', 'required', 'skip_confirmation', 'options', 'sort_order'];
 
-    protected $attributes = ['field_type' => 'text', 'required' => false, 'sort_order' => 0];
+    protected $attributes = ['field_type' => 'text', 'required' => false, 'skip_confirmation' => false, 'sort_order' => 0];
 
     public function uniqueIds(): array
     {
@@ -26,6 +26,6 @@ class AiAssistantField extends Model
 
     protected function casts(): array
     {
-        return ['required' => 'boolean', 'options' => 'array', 'sort_order' => 'integer'];
+        return ['required' => 'boolean', 'skip_confirmation' => 'boolean', 'options' => 'array', 'sort_order' => 'integer'];
     }
 }

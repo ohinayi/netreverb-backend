@@ -36,6 +36,7 @@ class UpsertAiAssistantRequest extends FormRequest
             ],
             'fields.*.question' => ['nullable', 'string', 'max:1000'],
             'fields.*.required' => ['sometimes', 'boolean'],
+            'fields.*.skip_confirmation' => ['sometimes', 'boolean'],
             'fields.*.options' => ['nullable', 'array', 'max:50'],
             'fields.*.options.*' => ['string', 'max:120'],
             'fields.*.sort_order' => ['sometimes', 'integer', 'min:0', 'max:1000'],

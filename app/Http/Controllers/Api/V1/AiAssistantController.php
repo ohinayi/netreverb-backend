@@ -143,7 +143,7 @@ class AiAssistantController extends Controller
         $assistant->fields()->delete();
         $assistant->fields()->createMany(array_map(
             fn (array $field, int $index): array => [
-                ...Arr::only($field, ['key', 'label', 'field_type', 'question', 'required', 'options']),
+                ...Arr::only($field, ['key', 'label', 'field_type', 'question', 'required', 'skip_confirmation', 'options']),
                 'sort_order' => $field['sort_order'] ?? $index,
             ],
             $fields,
