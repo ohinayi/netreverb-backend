@@ -90,6 +90,30 @@ class AiAssistantLiveCallFlowTest extends TestCase
         Storage::disk('ai_assistant_recordings')->put("answers-{$session->public_id}-{$fieldKey}-{$session->retry_count}.wav", str_repeat('x', 200));
     }
 
+    /**
+     * Transcribe+extract now run in a queued job (ProcessLiveAiAssistantAnswer)
+     * instead of inline - the first hit to the answer context always
+     * dispatches the job and returns a wait-tone loop, never the real
+     * result. QUEUE_CONNECTION=sync in phpunit.xml means the job actually
+     * finishes during that first dispatch() call, so a second hit is
+     * always enough here (a real, async queue would just take one or more
+     * extra ~700ms poll round-trips instead).
+     */
+    private function pollAnswerUntilReady(string $publicId): \Illuminate\Testing\TestResponse
+    {
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$publicId
+        );
+
+        if (str_contains($response->getContent(), 'tone_stream://')) {
+            $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+                '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$publicId
+            );
+        }
+
+        return $response;
+    }
+
     public function test_dialing_an_assistant_service_number_starts_a_session_and_asks_the_first_field(): void
     {
         $this->allowXmlCurl();
@@ -150,9 +174,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
         ]);
         $this->putFakeRecording($session, 'name');
 
-        $answer = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
-            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
-        )->assertOk();
+        $answer = $this->pollAnswerUntilReady($session->public_id)->assertOk();
         $this->assertStringContainsString('Abdul', $answer->getContent());
         $this->assertStringContainsString(AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX, $answer->getContent());
 
@@ -168,9 +190,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
         $aiState->transcript = 'abdul at example dot com';
         $aiState->value = 'abdul@example.com';
         $this->putFakeRecording($session, 'email');
-        $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
-            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
-        )->assertOk();
+        $this->pollAnswerUntilReady($session->public_id)->assertOk();
         $finalConfirm = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
             '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX.$session->public_id.'&destination_number=1'
         )->assertOk();
@@ -219,9 +239,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
         ]);
         $this->putFakeRecording($session, 'name');
 
-        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
-            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
-        )->assertOk();
+        $response = $this->pollAnswerUntilReady($session->public_id)->assertOk();
 
         $this->assertStringNotContainsString(AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX, $response->getContent());
         $this->assertStringContainsString('What is your name?', $response->getContent());
@@ -317,9 +335,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
         ]);
         $this->putFakeRecording($session, 'name');
 
-        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
-            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
-        )->assertOk();
+        $response = $this->pollAnswerUntilReady($session->public_id)->assertOk();
 
         $xml = $response->getContent();
         $this->assertStringNotContainsString(AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX, $xml);
@@ -349,9 +365,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
         ]);
         $this->putFakeRecording($session, 'name');
 
-        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
-            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$session->public_id
-        )->assertOk();
+        $response = $this->pollAnswerUntilReady($session->public_id)->assertOk();
 
         $this->assertStringContainsString('What is your name?', $response->getContent());
         $session->refresh();

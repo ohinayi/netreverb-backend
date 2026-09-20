@@ -4,6 +4,7 @@ namespace App\Services\Telephony;
 
 use App\Contracts\Ai\AudioTranscriptionProvider;
 use App\Contracts\Ai\StructuredAssistantProvider;
+use App\Jobs\ProcessLiveAiAssistantAnswer;
 use App\Models\AiAssistant;
 use App\Models\AiAssistantField;
 use App\Models\AiAssistantSession;
@@ -106,16 +107,16 @@ class AiAssistantCallFlow
             return $this->respond($xml);
         }
 
-        $transcript = $this->transcribeAnswer($session, $field);
-        $session->update(['transcript' => trim(($session->transcript ?? '')."\n".$field->key.': '.$transcript)]);
-
-        if (trim($transcript) === '') {
-            $this->emitRedoOrSkip($xml, $condition, $session, $field);
-
-            return $this->respond($xml);
+        if ($session->answer_ready_at === null) {
+            return $this->respond($this->waitForBackgroundAnswer($xml, $condition, $session, $field));
         }
 
-        $value = $this->extractFieldValue($session, $field, $transcript);
+        // Ready: the background job (ProcessLiveAiAssistantAnswer) already
+        // did the transcribe+extract work and wrote its result to
+        // pending_value - this just consumes it, exactly like the old
+        // synchronous code path did with a freshly-computed value.
+        $session->update(['answer_processing_started_at' => null, 'answer_ready_at' => null]);
+        $value = $session->pending_value;
 
         if ($value === null || $value === '') {
             $this->emitRedoOrSkip($xml, $condition, $session, $field);
@@ -138,7 +139,6 @@ class AiAssistantCallFlow
             return $this->respond($xml);
         }
 
-        $session->update(['pending_value' => (string) $value]);
         // The caller's actual captured value can't be pre-cached (it's
         // unknown until they say it), but Piper is fast enough to run
         // synchronously right here - a few hundred ms for a short phrase -
@@ -158,6 +158,95 @@ class AiAssistantCallFlow
         $this->appendTransfer($xml, $condition, '${ai_confirm_digit}', self::CONFIRM_CONTEXT_PREFIX.$session->public_id);
 
         return $this->respond($xml);
+    }
+
+    /**
+     * Does the actual transcribe+extract work for the caller's current
+     * answer, called from ProcessLiveAiAssistantAnswer off the request/
+     * response cycle rather than from handleAnswer() directly - see that
+     * job's docblock for why. Writes straight to the session row and sets
+     * answer_ready_at last, so handleAnswer()'s poll never observes a
+     * partially-written result.
+     */
+    public function processAnswerInBackground(AiAssistantSession $session): void
+    {
+        $field = $session->assistant->fields->firstWhere('key', $session->current_field_key);
+
+        if (! $field) {
+            $session->update(['pending_value' => null, 'answer_ready_at' => now()]);
+
+            return;
+        }
+
+        $transcript = $this->transcribeAnswer($session, $field);
+        $session->update(['transcript' => trim(($session->transcript ?? '')."\n".$field->key.': '.$transcript)]);
+
+        if (trim($transcript) === '') {
+            $session->update(['pending_value' => null, 'answer_ready_at' => now()]);
+
+            return;
+        }
+
+        $value = $this->extractFieldValue($session, $field, $transcript);
+        $session->update([
+            'pending_value' => ($value === null || $value === '') ? null : (string) $value,
+            'answer_ready_at' => now(),
+        ]);
+    }
+
+    /**
+     * First hit for this answer dispatches the background job and starts
+     * waiting; every hit after that (including this first one) just plays a
+     * short tone and re-fetches this same context a moment later, until
+     * answer_ready_at shows up. A stuck/crashed job can't strand the caller
+     * forever - past answer_processing_timeout_seconds this gives up and
+     * treats it exactly like an empty/failed answer.
+     */
+    private function waitForBackgroundAnswer(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session, AiAssistantField $field): \DOMDocument
+    {
+        if ($session->answer_processing_started_at === null) {
+            $session->update(['answer_processing_started_at' => now()]);
+            ProcessLiveAiAssistantAnswer::dispatch($session->id)->onQueue('ai');
+        } elseif ($this->answerProcessingTimedOut($session)) {
+            Log::warning('AI assistant live answer processing timed out.', [
+                'session_id' => $session->id, 'field' => $field->key,
+            ]);
+            $session->update(['answer_processing_started_at' => null, 'answer_ready_at' => null, 'pending_value' => null]);
+            $this->emitRedoOrSkip($xml, $condition, $session, $field);
+
+            return $xml;
+        }
+
+        $this->appendWaitTone($xml, $condition, $session);
+
+        return $xml;
+    }
+
+    private function answerProcessingTimedOut(AiAssistantSession $session): bool
+    {
+        $timeoutSeconds = (int) config('telephony.ai_assistant.answer_processing_timeout_seconds', 15);
+
+        return $session->answer_processing_started_at !== null
+            && $session->answer_processing_started_at->lt(now()->subSeconds($timeoutSeconds));
+    }
+
+    /**
+     * A short, deliberately plain tone rather than speech or music - it has
+     * to loop every ~700ms without becoming annoying or sounding like the
+     * assistant is repeating itself. Filling this gap matters: without it,
+     * FreeSWITCH just sits on our HTTP response with nothing playing at
+     * all, and a caller mid-call with dead air reasonably assumes the line
+     * dropped.
+     */
+    private function appendWaitTone(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
+    {
+        $tone = $condition->appendChild($xml->createElement('action'));
+        $tone->setAttribute('application', 'playback');
+        $tone->setAttribute('data', 'tone_stream://%(200,150,950)');
+        $sleep = $condition->appendChild($xml->createElement('action'));
+        $sleep->setAttribute('application', 'sleep');
+        $sleep->setAttribute('data', '500');
+        $this->appendTransfer($xml, $condition, 'continue', self::ANSWER_CONTEXT_PREFIX.$session->public_id);
     }
 
     /** Serves the re-fetch after the confirm/redo digit is read. */

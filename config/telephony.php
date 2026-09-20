@@ -46,6 +46,11 @@ return [
         'record_silence_threshold' => (int) env('AI_ASSISTANT_RECORD_SILENCE_THRESHOLD', 200),
         'record_silence_hits' => (int) env('AI_ASSISTANT_RECORD_SILENCE_HITS', 3),
         'max_retries' => (int) env('AI_ASSISTANT_MAX_RETRIES', 2),
+        // How long the caller's wait-tone loop keeps polling
+        // ProcessLiveAiAssistantAnswer before giving up and treating the
+        // answer as failed - a safety valve against a stuck/crashed queue
+        // worker stranding the caller in an endless tone loop.
+        'answer_processing_timeout_seconds' => (int) env('AI_ASSISTANT_ANSWER_PROCESSING_TIMEOUT_SECONDS', 15),
         'remote_fetch' => [
             // In production this app runs on the same VPS as FreeSWITCH, so
             // base_path is already directly readable and this stays off. In
