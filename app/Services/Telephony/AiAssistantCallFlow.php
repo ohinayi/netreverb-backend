@@ -231,8 +231,9 @@ class AiAssistantCallFlow
     }
 
     /**
-     * A short, deliberately plain tone rather than speech or music - it has
-     * to loop every ~700ms without becoming annoying or sounding like the
+     * A soft dual-tone chime (two low, close-together frequencies, gently
+     * pulsed) rather than a sharp single-frequency beep - it has to loop
+     * every ~700ms without becoming annoying or sounding like the
      * assistant is repeating itself. Filling this gap matters: without it,
      * FreeSWITCH just sits on our HTTP response with nothing playing at
      * all, and a caller mid-call with dead air reasonably assumes the line
@@ -242,10 +243,10 @@ class AiAssistantCallFlow
     {
         $tone = $condition->appendChild($xml->createElement('action'));
         $tone->setAttribute('application', 'playback');
-        $tone->setAttribute('data', 'tone_stream://%(200,150,950)');
+        $tone->setAttribute('data', 'tone_stream://%(300,200,440,480)');
         $sleep = $condition->appendChild($xml->createElement('action'));
         $sleep->setAttribute('application', 'sleep');
-        $sleep->setAttribute('data', '500');
+        $sleep->setAttribute('data', '400');
         $this->appendTransfer($xml, $condition, 'continue', self::ANSWER_CONTEXT_PREFIX.$session->public_id);
     }
 
