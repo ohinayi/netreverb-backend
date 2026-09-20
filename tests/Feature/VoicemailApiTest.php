@@ -25,9 +25,9 @@ class VoicemailApiTest extends TestCase
         Sanctum::actingAs($owner);
 
         $extension = Extension::factory()->for($organization)->create();
-        Storage::disk('freeswitch_voicemails')->put($extension->public_id.'/20260101-000000_2348012345678.wav', 'fake-audio');
+        Storage::disk('freeswitch_voicemails')->put($extension->public_id.'_20260101-000000_2348012345678.wav', 'fake-audio');
         $voicemail = Voicemail::factory()->for($organization)->for($extension)->create([
-            'file_path' => $extension->public_id.'/20260101-000000_2348012345678.wav',
+            'file_path' => $extension->public_id.'_20260101-000000_2348012345678.wav',
             'caller_number' => '2348012345678',
         ]);
 

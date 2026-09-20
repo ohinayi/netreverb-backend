@@ -211,7 +211,7 @@ class FreeSwitchIvrDialplanTest extends TestCase
         $xml = $response->getContent();
         $this->assertStringContainsString('application="answer"', $xml);
         $this->assertStringContainsString('application="record"', $xml);
-        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'_', $xml);
         $this->assertStringContainsString('application="hangup"', $xml);
     }
 

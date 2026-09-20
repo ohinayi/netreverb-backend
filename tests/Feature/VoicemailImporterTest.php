@@ -33,7 +33,7 @@ class VoicemailImporterTest extends TestCase
         config()->set('telephony.voicemail.disk', 'freeswitch_voicemails');
 
         $extension = Extension::factory()->create();
-        $relativePath = $extension->public_id.'/20260101-000000_2348012345678.wav';
+        $relativePath = $extension->public_id.'_20260101-000000_2348012345678.wav';
         $disk = Storage::disk('freeswitch_voicemails');
         $disk->put($relativePath, $this->buildWavBytes(8000, 1, 16, 3.0));
         touch($disk->path($relativePath), time() - 30);
@@ -54,7 +54,7 @@ class VoicemailImporterTest extends TestCase
         config()->set('telephony.voicemail.disk', 'freeswitch_voicemails');
 
         $extension = Extension::factory()->create();
-        $relativePath = $extension->public_id.'/20260101-000000_2348012345678.wav';
+        $relativePath = $extension->public_id.'_20260101-000000_2348012345678.wav';
         Storage::disk('freeswitch_voicemails')->put($relativePath, $this->buildWavBytes(8000, 1, 16, 3.0));
 
         $imported = (new VoicemailImporter)->importNew();
@@ -69,7 +69,7 @@ class VoicemailImporterTest extends TestCase
         config()->set('telephony.voicemail.disk', 'freeswitch_voicemails');
 
         $extension = Extension::factory()->create();
-        $relativePath = $extension->public_id.'/20260101-000000_2348012345678.wav';
+        $relativePath = $extension->public_id.'_20260101-000000_2348012345678.wav';
         $disk = Storage::disk('freeswitch_voicemails');
         $disk->put($relativePath, $this->buildWavBytes(8000, 1, 16, 3.0));
         touch($disk->path($relativePath), time() - 30);

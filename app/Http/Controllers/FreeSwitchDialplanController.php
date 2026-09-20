@@ -407,8 +407,12 @@ class FreeSwitchDialplanController extends Controller
      * `ai_assistant` record pattern). `${strftime(...)}`/`${caller_id_number}`
      * are FreeSWITCH channel-variable expansions, not PHP - they're
      * resolved when this action actually runs, not when this XML is built.
-     * The extension's own public_id (not its number) names the folder so
-     * the later sync/import step can resolve the mailbox owner without a
+     * Deliberately flat (no per-extension subdirectory): FreeSWITCH's
+     * `record` app can't create missing parent directories on its own, so a
+     * subfolder that needs creating at record time would just fail (see
+     * AiAssistantCallFlow::recordingPath() for the same gotcha). The
+     * extension's own public_id is encoded as the filename's first segment
+     * instead, so VoicemailImporter can resolve the mailbox owner without a
      * database round-trip mid-call.
      */
     private function appendVoicemailRecording(\DOMDocument $xml, \DOMElement $condition, Extension $extension): void
@@ -447,7 +451,7 @@ class FreeSwitchDialplanController extends Controller
 
         $recordPath = rtrim((string) config('telephony.voicemail.base_path'), '/')
             .'/'.$extension->public_id
-            .'/${strftime(%Y%m%d-%H%M%S)}_${caller_id_number}.wav';
+            .'_${strftime(%Y%m%d-%H%M%S)}_${caller_id_number}.wav';
         $record = $condition->appendChild($xml->createElement('action'));
         $record->setAttribute('application', 'record');
         // record syntax: path, time_limit_secs, silence_thresh, silence_hits.

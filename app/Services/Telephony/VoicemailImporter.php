@@ -10,8 +10,10 @@ class VoicemailImporter
 {
     /**
      * Scans the voicemail disk for files FreeSWITCH's `record` action wrote
-     * that don't have a Voicemail row yet. Files live at
-     * `{extension_public_id}/{timestamp}_{caller_number}.wav` - see
+     * that don't have a Voicemail row yet. Files are flat (no
+     * per-extension subdirectory - FreeSWITCH's `record` app can't create
+     * missing directories) at
+     * `{extension_public_id}_{timestamp}_{caller_number}.wav` - see
      * FreeSwitchDialplanController::appendVoicemailRecording().
      */
     public function importNew(): int
@@ -28,14 +30,11 @@ class VoicemailImporter
                 continue;
             }
 
-            $segments = explode('/', $path);
-            if (count($segments) < 2) {
+            $filename = pathinfo($path, PATHINFO_FILENAME);
+            [$extensionPublicId, $timestamp, $callerNumber] = array_pad(explode('_', $filename, 3), 3, '');
+            if ($extensionPublicId === '') {
                 continue;
             }
-
-            $extensionPublicId = $segments[count($segments) - 2];
-            $filename = pathinfo($path, PATHINFO_FILENAME);
-            [$timestamp, $callerNumber] = array_pad(explode('_', $filename, 2), 2, '');
 
             $extension = Extension::query()->where('public_id', $extensionPublicId)->first();
             if (! $extension) {

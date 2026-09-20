@@ -75,7 +75,7 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
         $response->assertOk();
         $xml = $response->getContent();
         $this->assertStringContainsString('application="record"', $xml);
-        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'_', $xml);
     }
 
     public function test_a_service_number_pointing_at_a_missing_mailbox_extension_speaks_unavailable_instead_of_dead_air(): void
@@ -154,7 +154,7 @@ class FreeSwitchServiceNumberFallbackTest extends TestCase
         $response->assertOk();
         $xml = $response->getContent();
         $this->assertStringContainsString('application="record"', $xml);
-        $this->assertStringContainsString('voicemail/'.$extension->public_id.'/', $xml);
+        $this->assertStringContainsString('voicemail/'.$extension->public_id.'_', $xml);
         $this->assertStringNotContainsString('currently unavailable', $xml);
     }
 
