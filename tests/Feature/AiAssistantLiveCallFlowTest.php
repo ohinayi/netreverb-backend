@@ -93,7 +93,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
     /**
      * Transcribe+extract now run in a queued job (ProcessLiveAiAssistantAnswer)
      * instead of inline - the first hit to the answer context always
-     * dispatches the job and returns a wait-tone loop, never the real
+     * dispatches the job and returns a wait-message loop, never the real
      * result. QUEUE_CONNECTION=sync in phpunit.xml means the job actually
      * finishes during that first dispatch() call, so a second hit is
      * always enough here (a real, async queue would just take one or more
@@ -105,7 +105,7 @@ class AiAssistantLiveCallFlowTest extends TestCase
             '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$publicId
         );
 
-        if (str_contains($response->getContent(), 'tone_stream://')) {
+        if (str_contains($response->getContent(), 'ai-assistant-wait.wav') || str_contains($response->getContent(), 'One moment, please.')) {
             $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
                 '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantCallFlow::ANSWER_CONTEXT_PREFIX.$publicId
             );

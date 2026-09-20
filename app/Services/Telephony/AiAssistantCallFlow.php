@@ -217,7 +217,7 @@ class AiAssistantCallFlow
             return $xml;
         }
 
-        $this->appendWaitTone($xml, $condition, $session);
+        $this->appendWaitMessage($xml, $condition, $session);
 
         return $xml;
     }
@@ -231,19 +231,39 @@ class AiAssistantCallFlow
     }
 
     /**
-     * A soft dual-tone chime (two low, close-together frequencies, gently
-     * pulsed) rather than a sharp single-frequency beep - it has to loop
-     * every ~700ms without becoming annoying or sounding like the
-     * assistant is repeating itself. Filling this gap matters: without it,
-     * FreeSWITCH just sits on our HTTP response with nothing playing at
-     * all, and a caller mid-call with dead air reasonably assumes the line
-     * dropped.
+     * A short spoken phrase instead of a tone - live-tested feedback found
+     * a beep/chime unpleasant. Uses the same Piper voice and caching
+     * pattern as appendUnavailableMessage (generated once, reused for
+     * every caller/session, not per-call). Has to loop every ~1.5-2s
+     * without feeling like the assistant is stuck repeating itself.
+     * Filling this gap matters: without it, FreeSWITCH just sits on our
+     * HTTP response with nothing playing at all, and a caller mid-call
+     * with dead air reasonably assumes the line dropped.
      */
-    private function appendWaitTone(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
+    private function appendWaitMessage(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
     {
-        $tone = $condition->appendChild($xml->createElement('action'));
-        $tone->setAttribute('application', 'playback');
-        $tone->setAttribute('data', 'tone_stream://%(300,200,440,480)');
+        $text = 'One moment, please.';
+        $relativePath = 'system-prompts/ai-assistant-wait.wav';
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            $this->piper->generate($text, $relativePath);
+        }
+
+        if ($disk->exists($relativePath)) {
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($relativePath, '/')
+                : storage_path('app/public/'.$relativePath);
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'playback');
+            $action->setAttribute('data', $audioPath);
+        } else {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'speak');
+            $action->setAttribute('data', 'flite|slt|'.$text);
+        }
+
         $sleep = $condition->appendChild($xml->createElement('action'));
         $sleep->setAttribute('application', 'sleep');
         $sleep->setAttribute('data', '400');
