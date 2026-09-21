@@ -85,6 +85,20 @@ class StoreCallLogRequest extends FormRequest
                     );
                 }
             }
+
+            // The frontend already blocks this in stores/calling.ts's call()
+            // wrapper, but that only covers the normal dial UI - this closes
+            // the gap for the API itself and any other caller of it.
+            $callerDigits = preg_replace('/\D+/', '', $this->string('caller_number')->toString());
+            $calleeDigits = preg_replace('/\D+/', '', $this->string('callee_number')->toString());
+            $sameNumber = $callerDigits !== '' && $callerDigits === $calleeDigits;
+            $sameExtension = $this->filled('caller_extension_public_id')
+                && $this->filled('callee_extension_public_id')
+                && $this->string('caller_extension_public_id')->toString() === $this->string('callee_extension_public_id')->toString();
+
+            if ($sameNumber || $sameExtension) {
+                $validator->errors()->add('callee_number', 'You cannot call your own extension.');
+            }
         }];
     }
 }

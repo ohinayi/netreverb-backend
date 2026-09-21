@@ -87,14 +87,26 @@ class CallLogController extends Controller
                 $query->whereNotNull('caller_extension_id')
                     ->whereNull('callee_extension_id');
             })
-            ->when($filter === 'missed', function ($query): void {
-                $query->whereNull('caller_extension_id')
-                    ->whereNotNull('callee_extension_id')
+            ->when($filter === 'missed', function ($query) use ($canViewAll, $accessibleExtensionIds): void {
+                // whereNull('caller_extension_id') used to be required here,
+                // which only matched externally-originated inbound calls -
+                // an internal caller's row always has caller_extension_id
+                // set, so an org member missing a call from a colleague
+                // never showed up under "missed" at all. Each side of a call
+                // writes its own call_logs row (no shared key between them),
+                // so an unanswered internal call also leaves the CALLER's
+                // own row behind with status=canceled - restrict to rows
+                // where the viewer's own extension is the callee side so
+                // that row doesn't wrongly count as a missed call for them.
+                $query->whereNotNull('callee_extension_id')
                     ->whereIn('status', [
                         CallStatus::Busy,
                         CallStatus::NoAnswer,
                         CallStatus::Canceled,
-                    ]);
+                    ])
+                    ->when(! $canViewAll, function ($query) use ($accessibleExtensionIds): void {
+                        $query->whereIn('callee_extension_id', $accessibleExtensionIds);
+                    });
             })
             ->latest();
 
