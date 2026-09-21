@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\V1\CallQueueController;
 use App\Http\Controllers\Api\V1\CallRecordingController;
 use App\Http\Controllers\Api\V1\CallRingbackAudioController;
 use App\Http\Controllers\Api\V1\CommunityController;
+use App\Http\Controllers\Api\V1\ConferenceCaptionsController;
+use App\Http\Controllers\Api\V1\ConferenceCaptionsTokenController;
 use App\Http\Controllers\Api\V1\ConferenceRecordingController;
 use App\Http\Controllers\Api\V1\ConferenceRoomChatController;
 use App\Http\Controllers\Api\V1\ConferenceRoomController;
@@ -180,6 +182,10 @@ Route::prefix('v1')->group(function (): void {
                 ->name('conference-rooms.chat.stream');
             Route::post('conference-rooms/{conferenceRoom}/chat/messages', [ConferenceRoomChatController::class, 'store'])
                 ->name('conference-rooms.chat.messages.store');
+            Route::post(
+                'conference-rooms/{conferenceRoom}/captions-token',
+                ConferenceCaptionsTokenController::class,
+            )->name('conference-rooms.captions-token');
 
             Route::apiResource('organizations', OrganizationController::class)->except('destroy');
             Route::post('organizations/{organization}/ringback-audio', [OrganizationController::class, 'uploadRingbackAudio']);
@@ -224,6 +230,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
                     ->middleware('throttle:message-send')
                     ->name('conversations.messages.store');
+                Route::post('conversations/{conversation}/messages/voice', [MessageController::class, 'storeVoice'])
+                    ->middleware('throttle:message-send')
+                    ->name('conversations.messages.voice.store');
                 Route::post('conversations/{conversation}/messages/{message}/translate', [MessageTranslationController::class, 'store'])
                     ->middleware('throttle:message-translate')
                     ->name('conversations.messages.translate');
@@ -379,6 +388,10 @@ Route::prefix('v1')->group(function (): void {
                     LiveKitTokenController::class,
                 )->name('organizations.conference-rooms.livekit-token');
                 Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/captions-token',
+                    ConferenceCaptionsTokenController::class,
+                )->name('organizations.conference-rooms.captions-token');
+                Route::post(
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/join',
                     [ConferenceRoomController::class, 'join'],
                 )->name('organizations.conference-rooms.join');
@@ -474,6 +487,14 @@ Route::prefix('v1')->group(function (): void {
                     'organizations/{organization}/conference-rooms/{conferenceRoom}/recording/stop',
                     [ConferenceRecordingController::class, 'stop'],
                 )->name('organizations.conference-rooms.recording.stop');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/captions/start',
+                    [ConferenceCaptionsController::class, 'start'],
+                )->name('organizations.conference-rooms.captions.start');
+                Route::post(
+                    'organizations/{organization}/conference-rooms/{conferenceRoom}/captions/stop',
+                    [ConferenceCaptionsController::class, 'stop'],
+                )->name('organizations.conference-rooms.captions.stop');
                 Route::post(
                     'organizations/{organization}/extensions/{extension}/credentials/rotate',
                     SipCredentialController::class,

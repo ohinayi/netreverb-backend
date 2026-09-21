@@ -63,6 +63,7 @@ class ConferenceRoomResource extends JsonResource
                     : ConferenceRoomParticipantResource::make($this->currentUserParticipant),
             ),
             'passcode_required' => $this->passcode_hash !== null,
+            'captions_enabled' => (bool) data_get($this->configuration, 'captions_enabled', false),
         ];
     }
 
