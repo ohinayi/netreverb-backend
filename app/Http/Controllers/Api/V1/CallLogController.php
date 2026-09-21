@@ -8,6 +8,7 @@ use App\Enums\CallLogParticipantStatus;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Enums\ExtensionStatus;
+use App\Enums\FriendshipStatus;
 use App\Exceptions\FreeSwitchAddPartyException;
 use App\Exceptions\FreeSwitchTransferException;
 use App\Http\Controllers\Controller;
@@ -19,6 +20,7 @@ use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
 use App\Models\CallLogParticipant;
 use App\Models\Extension;
+use App\Models\Friendship;
 use App\Models\Organization;
 use App\Services\Auditing\AuditLogger;
 use App\Services\Authorization\CallLogVisibility;
@@ -197,15 +199,27 @@ class CallLogController extends Controller
         abort_if($callUuid === null || $callUuid === '', Response::HTTP_CONFLICT,
             'This call is not connected to FreeSWITCH yet. Try again once it is active.');
 
+        // Unlike transfer() (organization members only, since it hands the
+        // call to someone managing it), adding a party also allows any
+        // accepted friend's extension on any organization - just not an
+        // arbitrary stranger's extension merely because it exists somewhere
+        // on the platform.
         $destination = $request->string('destination')->toString();
         $destinationExtension = Extension::query()
-            ->where('organization_id', $organization->id)
             ->whereHas('dialableNumber', fn ($query) => $query->where('number', $destination))
             ->first();
 
-        if ($destinationExtension === null || $destinationExtension->status !== ExtensionStatus::Active) {
+        $isSameOrganization = $destinationExtension?->organization_id === $organization->id;
+        $isFriend = $destinationExtension !== null
+            && $destinationExtension->user_id !== null
+            && $this->areFriends($request->user()->id, $destinationExtension->user_id);
+
+        if ($destinationExtension === null
+            || $destinationExtension->status !== ExtensionStatus::Active
+            || ! ($isSameOrganization || $isFriend)
+        ) {
             throw ValidationException::withMessages([
-                'destination' => 'You can only add an active extension in this organization to a call.',
+                'destination' => 'You can only add your own organization\'s members or an accepted friend to a call.',
             ]);
         }
 
@@ -288,6 +302,21 @@ class CallLogController extends Controller
         );
 
         return CallLogResource::make($callLog->load($this->callLogRelations()));
+    }
+
+    private function areFriends(int $userId, int $otherUserId): bool
+    {
+        if ($userId === $otherUserId) {
+            return false;
+        }
+
+        return Friendship::query()
+            ->where('status', FriendshipStatus::Accepted)
+            ->where(function ($query) use ($userId, $otherUserId): void {
+                $query->where(['requester_id' => $userId, 'addressee_id' => $otherUserId])
+                    ->orWhere(['requester_id' => $otherUserId, 'addressee_id' => $userId]);
+            })
+            ->exists();
     }
 
     private function resolveConferenceMemberId(string $conferenceName, ?string $freeswitchUuid): ?string

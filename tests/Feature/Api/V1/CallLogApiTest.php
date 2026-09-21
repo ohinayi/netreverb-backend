@@ -10,6 +10,7 @@ use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
+use App\Enums\FriendshipStatus;
 use App\Enums\MembershipRole;
 use App\Exceptions\FreeSwitchAddPartyException;
 use App\Jobs\SyncCallRecordingFromVps;
@@ -17,6 +18,7 @@ use App\Models\CallLog;
 use App\Models\CallLogParticipant;
 use App\Models\Department;
 use App\Models\Extension;
+use App\Models\Friendship;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\User;
@@ -926,6 +928,41 @@ class CallLogApiTest extends TestCase
             ['destination' => $outsideExtension->dialableNumber->number],
         )->assertUnprocessable()
             ->assertJsonValidationErrors('destination');
+    }
+
+    public function test_owner_can_add_an_accepted_friend_from_another_organization_to_a_call(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+        ]);
+
+        $friendOrganization = Organization::factory()->create();
+        $friendUser = User::factory()->create();
+        $friendExtension = Extension::factory()->for($friendOrganization)->for($friendUser)->create();
+        Friendship::factory()->create([
+            'requester_id' => $owner->id,
+            'addressee_id' => $friendUser->id,
+            'status' => FriendshipStatus::Accepted,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('addParty')->once()->andReturn('consultation-uuid-9999');
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $friendExtension->dialableNumber->number],
+        )->assertOk()
+            ->assertJsonCount(1, 'data.participants');
+
+        $this->assertDatabaseHas('call_log_participants', [
+            'call_log_id' => $callLog->id,
+            'extension_id' => $friendExtension->id,
+        ]);
     }
 
     public function test_add_party_restores_the_original_call_when_the_destination_does_not_answer(): void

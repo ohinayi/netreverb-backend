@@ -26,7 +26,10 @@ class FriendshipController extends Controller
                 $query->where('requester_id', $request->user()->id)
                     ->orWhere('addressee_id', $request->user()->id);
             })
-            ->with(['requester', 'addressee'])
+            ->with([
+                'requester.extensions.dialableNumber',
+                'addressee.extensions.dialableNumber',
+            ])
             ->latest()
             ->paginate(25);
 
