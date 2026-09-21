@@ -3,8 +3,8 @@
 namespace App\Providers;
 
 use App\Contracts\Ai\AudioTranscriptionProvider;
-use App\Contracts\Ai\TimestampedAudioTranscriptionProvider;
 use App\Contracts\Ai\StructuredAssistantProvider;
+use App\Contracts\Ai\TimestampedAudioTranscriptionProvider;
 use App\Contracts\Messaging\OutboundMessageProvider;
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Recordings\ConferenceRecordingStorage;
@@ -14,12 +14,14 @@ use App\Contracts\Telephony\FreeSwitchQueueGateway;
 use App\Contracts\Telephony\SipSubscriberGateway;
 use App\Contracts\Translation\MessageTranslationProvider;
 use App\Models\CallLog;
+use App\Models\Message;
 use App\Models\User;
 use App\Observers\CallLogObserver;
+use App\Observers\MessageObserver;
 use App\Observers\UserObserver;
 use App\Services\Ai\GeminiStructuredAssistantProvider;
-use App\Services\Ai\WhisperCppTranscriptionProvider;
 use App\Services\Ai\WhisperCppTimestampedAudioTranscriptionProvider;
+use App\Services\Ai\WhisperCppTranscriptionProvider;
 use App\Services\Messaging\DisabledOutboundMessageProvider;
 use App\Services\Messaging\EBulkSmsOutboundMessageProvider;
 use App\Services\Recordings\LocalCallRecordingStorage;
@@ -87,6 +89,7 @@ class AppServiceProvider extends ServiceProvider
         Model::shouldBeStrict(! app()->isProduction());
         CallLog::observe(CallLogObserver::class);
         User::observe(UserObserver::class);
+        Message::observe(MessageObserver::class);
 
         RateLimiter::for('webrtc-bootstrap', fn (Request $request): Limit => Limit::perMinute(10)
             ->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip())));

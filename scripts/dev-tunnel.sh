@@ -30,6 +30,7 @@ while true; do
     -L 127.0.0.1:7880:127.0.0.1:7880 \
     -L 127.0.0.1:6379:127.0.0.1:6379 \
     -R "127.0.0.1:${port}:127.0.0.1:8000" \
+    -R 127.0.0.1:8090:127.0.0.1:8090 \
     deploy@sip.classyra.com.ng
   printf '%s\n' 'Tunnel disconnected, retrying in 5 seconds...'
   sleep 5
