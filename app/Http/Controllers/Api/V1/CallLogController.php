@@ -192,18 +192,19 @@ class CallLogController extends Controller
         Organization $organization,
         CallLog $callLog,
     ): CallLogResource {
-        Gate::authorize('transfer', $callLog);
+        // Adding a FRIEND to your own call is a personal action, not an
+        // organization-managed one like transfer() - any call participant
+        // may do it, including a plain member or an individual/personal
+        // workspace user, neither of which pass the 'transfer' ability.
+        // Adding an ORGANIZATION MEMBER still requires that stricter check
+        // below, once we know which kind of destination this is.
+        Gate::authorize('update', $callLog);
         abort_unless($callLog->organization_id === $organization->id, Response::HTTP_NOT_FOUND);
 
         $callUuid = $callLog->freeswitch_uuid;
         abort_if($callUuid === null || $callUuid === '', Response::HTTP_CONFLICT,
             'This call is not connected to FreeSWITCH yet. Try again once it is active.');
 
-        // Unlike transfer() (organization members only, since it hands the
-        // call to someone managing it), adding a party also allows any
-        // accepted friend's extension on any organization - just not an
-        // arbitrary stranger's extension merely because it exists somewhere
-        // on the platform.
         $destination = $request->string('destination')->toString();
         $destinationExtension = Extension::query()
             ->whereHas('dialableNumber', fn ($query) => $query->where('number', $destination))
@@ -220,6 +221,12 @@ class CallLogController extends Controller
         ) {
             throw ValidationException::withMessages([
                 'destination' => 'You can only add your own organization\'s members or an accepted friend to a call.',
+            ]);
+        }
+
+        if ($isSameOrganization && ! Gate::allows('transfer', $callLog)) {
+            throw ValidationException::withMessages([
+                'destination' => 'Only an organization admin can add another organization member to a call. You can still add a friend.',
             ]);
         }
 
@@ -273,9 +280,19 @@ class CallLogController extends Controller
         CallLog $callLog,
         CallLogParticipant $participant,
     ): CallLogResource {
-        Gate::authorize('transfer', $callLog);
+        Gate::authorize('update', $callLog);
         abort_unless($callLog->organization_id === $organization->id, Response::HTTP_NOT_FOUND);
         abort_unless($participant->call_log_id === $callLog->id, Response::HTTP_NOT_FOUND);
+
+        // Removing an org-member participant is the mirror of transfer()'s
+        // admin-only permission; removing a friend is the same personal
+        // action as adding one, open to any call participant.
+        $participant->loadMissing('extension');
+        if ($participant->extension?->organization_id === $callLog->organization_id && ! Gate::allows('transfer', $callLog)) {
+            throw ValidationException::withMessages([
+                'participant' => 'Only an organization admin can remove another organization member from a call.',
+            ]);
+        }
 
         if ($participant->status === CallLogParticipantStatus::Active && $callLog->conference_name !== null) {
             $memberId = $this->resolveConferenceMemberId($callLog->conference_name, $participant->freeswitch_uuid);

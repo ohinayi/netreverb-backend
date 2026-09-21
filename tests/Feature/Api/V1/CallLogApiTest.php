@@ -992,7 +992,60 @@ class CallLogApiTest extends TestCase
         $this->assertNull($callLog->refresh()->conference_name);
     }
 
-    public function test_member_cannot_add_a_party_to_a_call(): void
+    public function test_member_cannot_add_an_organization_member_to_their_own_call(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $memberExtension = Extension::factory()->for($organization)->for($member)->create();
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'caller_extension_id' => $memberExtension->id,
+        ]);
+        $destinationExtension = Extension::factory()->for($organization)->create();
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldNotReceive('addParty');
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($member);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $destinationExtension->dialableNumber->number],
+        )->assertUnprocessable()->assertJsonValidationErrors('destination');
+    }
+
+    public function test_member_can_add_an_accepted_friend_to_their_own_call(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $memberExtension = Extension::factory()->for($organization)->for($member)->create();
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'caller_extension_id' => $memberExtension->id,
+        ]);
+
+        $friendUser = User::factory()->create();
+        $friendExtension = Extension::factory()->for(Organization::factory()->create())->for($friendUser)->create();
+        Friendship::factory()->create([
+            'requester_id' => $member->id,
+            'addressee_id' => $friendUser->id,
+            'status' => FriendshipStatus::Accepted,
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('addParty')->once()->andReturn('consultation-uuid-member');
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($member);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $friendExtension->dialableNumber->number],
+        )->assertOk();
+    }
+
+    public function test_a_user_with_no_role_at_all_still_cannot_add_a_party_to_someone_elses_call(): void
     {
         [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
         $callLog = CallLog::factory()->for($organization)->create([
