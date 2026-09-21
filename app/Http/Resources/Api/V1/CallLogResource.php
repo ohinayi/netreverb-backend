@@ -48,6 +48,8 @@ class CallLogResource extends JsonResource
             'is_answered' => $callPerspective['party_status'] === 'answered',
             'duration' => $this->duration,
             'freeswitch_uuid' => $attributes['freeswitch_uuid'] ?? null,
+            'conference_name' => $attributes['conference_name'] ?? null,
+            'participants' => $this->whenLoaded('participants', fn () => CallLogParticipantResource::collection($this->participants)),
             'recording' => $hasVisibleRecording ? [
                 'url' => $recordingUrl ?? $this->recordingUrlFor($request),
                 'duration' => $attributes['recording_duration'] ?? null,

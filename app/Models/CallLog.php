@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'session_type',
     'duration',
     'freeswitch_uuid',
+    'conference_name',
     'recording_url',
     'recording_id',
     'recording_uuid',
@@ -94,6 +95,11 @@ class CallLog extends Model
     public function tickets(): HasMany
     {
         return $this->hasMany(Ticket::class);
+    }
+
+    public function participants(): HasMany
+    {
+        return $this->hasMany(CallLogParticipant::class);
     }
 
     protected function casts(): array

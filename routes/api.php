@@ -312,6 +312,10 @@ Route::prefix('v1')->group(function (): void {
                     ->parameters(['call-logs' => 'callLog']);
                 Route::post('organizations/{organization}/call-logs/{callLog}/transfer', [CallLogController::class, 'transfer'])
                     ->name('organizations.call-logs.transfer');
+                Route::post('organizations/{organization}/call-logs/{callLog}/add-party', [CallLogController::class, 'addParty'])
+                    ->name('organizations.call-logs.add-party');
+                Route::delete('organizations/{organization}/call-logs/{callLog}/participants/{participant}', [CallLogController::class, 'removeParticipant'])
+                    ->name('organizations.call-logs.participants.destroy');
                 Route::post(
                     'organizations/{organization}/call-logs/{callLog}/recording/start',
                     [CallRecordingController::class, 'start'],

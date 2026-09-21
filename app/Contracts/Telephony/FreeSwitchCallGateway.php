@@ -22,4 +22,19 @@ interface FreeSwitchCallGateway
         string $callerNumber,
         int $ringTimeoutSeconds = 20,
     ): void;
+
+    /**
+     * Ring a new destination and, once it answers, move the original call's
+     * two existing legs plus the new leg into a shared ad-hoc conference.
+     * Never SIP-holds the original parties; if the destination doesn't
+     * answer, the original call is left completely untouched. Returns the
+     * new leg's FreeSWITCH channel UUID.
+     */
+    public function addParty(
+        string $callUuid,
+        string $destination,
+        string $callerNumber,
+        string $conferenceName,
+        int $ringTimeoutSeconds = 20,
+    ): string;
 }

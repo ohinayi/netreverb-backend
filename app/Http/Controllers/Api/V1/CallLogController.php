@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Contracts\Telephony\FreeSwitchConferenceGateway;
+use App\Enums\CallLogParticipantStatus;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallStatus;
 use App\Enums\ExtensionStatus;
+use App\Exceptions\FreeSwitchAddPartyException;
 use App\Exceptions\FreeSwitchTransferException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\AddCallPartyRequest;
 use App\Http\Requests\Api\V1\StoreCallLogRequest;
 use App\Http\Requests\Api\V1\TransferCallRequest;
 use App\Http\Requests\Api\V1\UpdateCallLogRequest;
 use App\Http\Resources\Api\V1\CallLogResource;
 use App\Models\CallLog;
+use App\Models\CallLogParticipant;
 use App\Models\Extension;
 use App\Models\Organization;
 use App\Services\Auditing\AuditLogger;
@@ -36,6 +41,7 @@ class CallLogController extends Controller
         private readonly FreeSwitchCallUuidSynchronizer $uuidSynchronizer,
         private readonly CallRecordingManager $recordingManager,
         private readonly FreeSwitchCallGateway $callGateway,
+        private readonly FreeSwitchConferenceGateway $conferenceGateway,
         private readonly CallLogVisibility $callLogVisibility,
         private readonly AuditLogger $auditLogger,
     ) {}
@@ -68,6 +74,7 @@ class CallLogController extends Controller
                 'calleeExtension.dialableNumber',
                 'calleeExtension.user',
                 'calleeExtension.fallbackExtension',
+                'participants.extension.dialableNumber',
             ])
             ->withCount('notes')
             ->when(
@@ -176,6 +183,123 @@ class CallLogController extends Controller
         );
 
         return CallLogResource::make($callLog->load($this->callLogRelations()));
+    }
+
+    public function addParty(
+        AddCallPartyRequest $request,
+        Organization $organization,
+        CallLog $callLog,
+    ): CallLogResource {
+        Gate::authorize('transfer', $callLog);
+        abort_unless($callLog->organization_id === $organization->id, Response::HTTP_NOT_FOUND);
+
+        $callUuid = $callLog->freeswitch_uuid;
+        abort_if($callUuid === null || $callUuid === '', Response::HTTP_CONFLICT,
+            'This call is not connected to FreeSWITCH yet. Try again once it is active.');
+
+        $destination = $request->string('destination')->toString();
+        $destinationExtension = Extension::query()
+            ->where('organization_id', $organization->id)
+            ->whereHas('dialableNumber', fn ($query) => $query->where('number', $destination))
+            ->first();
+
+        if ($destinationExtension === null || $destinationExtension->status !== ExtensionStatus::Active) {
+            throw ValidationException::withMessages([
+                'destination' => 'You can only add an active extension in this organization to a call.',
+            ]);
+        }
+
+        $conferenceName = $callLog->conference_name ?? 'adhoc-'.$callLog->public_id;
+
+        try {
+            $consultationUuid = $this->callGateway->addParty(
+                $callUuid,
+                $destination,
+                $callLog->caller_number,
+                $conferenceName,
+                $destinationExtension->ring_timeout_seconds ?? 20,
+            );
+        } catch (FreeSwitchAddPartyException $exception) {
+            throw ValidationException::withMessages(['destination' => $exception->getMessage()]);
+        }
+
+        if ($callLog->conference_name === null) {
+            $callLog->update(['conference_name' => $conferenceName]);
+        }
+
+        $participant = $callLog->participants()->create([
+            'extension_id' => $destinationExtension->id,
+            'added_by_user_id' => $request->user()->id,
+            'freeswitch_uuid' => $consultationUuid,
+            'status' => CallLogParticipantStatus::Active,
+            'joined_at' => now(),
+        ]);
+
+        Log::info('Party added to active call.', [
+            'call_log_id' => $callLog->public_id,
+            'organization_id' => $organization->public_id,
+            'participant_id' => $participant->public_id,
+            'destination' => $destination,
+        ]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'call.party_added',
+            $callLog,
+            after: ['destination' => $destination],
+        );
+
+        return CallLogResource::make($callLog->load($this->callLogRelations()));
+    }
+
+    public function removeParticipant(
+        Request $request,
+        Organization $organization,
+        CallLog $callLog,
+        CallLogParticipant $participant,
+    ): CallLogResource {
+        Gate::authorize('transfer', $callLog);
+        abort_unless($callLog->organization_id === $organization->id, Response::HTTP_NOT_FOUND);
+        abort_unless($participant->call_log_id === $callLog->id, Response::HTTP_NOT_FOUND);
+
+        if ($participant->status === CallLogParticipantStatus::Active && $callLog->conference_name !== null) {
+            $memberId = $this->resolveConferenceMemberId($callLog->conference_name, $participant->freeswitch_uuid);
+
+            if ($memberId !== null) {
+                $this->conferenceGateway->kickMember($callLog->conference_name, $memberId);
+            }
+        }
+
+        $participant->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
+
+        Log::info('Participant removed from active call.', [
+            'call_log_id' => $callLog->public_id,
+            'organization_id' => $organization->public_id,
+            'participant_id' => $participant->public_id,
+        ]);
+        $this->auditLogger->record(
+            $request,
+            $request->user(),
+            $organization,
+            'call.party_removed',
+            $callLog,
+            after: ['participant_id' => $participant->public_id],
+        );
+
+        return CallLogResource::make($callLog->load($this->callLogRelations()));
+    }
+
+    private function resolveConferenceMemberId(string $conferenceName, ?string $freeswitchUuid): ?string
+    {
+        if ($freeswitchUuid === null) {
+            return null;
+        }
+
+        $member = collect($this->conferenceGateway->listMembers($conferenceName))
+            ->first(fn (array $member): bool => ($member['uuid'] ?? null) === $freeswitchUuid);
+
+        return $member['member_id'] ?? null;
     }
 
     /**
@@ -311,6 +435,12 @@ class CallLogController extends Controller
             $this->recordingManager->queueSync($callLog);
         }
 
+        if ($callLog->conference_name !== null && $this->isTerminalCallStatus($callLog->status)) {
+            $callLog->participants()
+                ->where('status', CallLogParticipantStatus::Active)
+                ->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
+        }
+
         $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
 
         Log::info('Call log updated.', [
@@ -440,6 +570,7 @@ class CallLogController extends Controller
             'calleeExtension.dialableNumber',
             'calleeExtension.user',
             'calleeExtension.fallbackExtension',
+            'participants.extension.dialableNumber',
         ];
     }
 

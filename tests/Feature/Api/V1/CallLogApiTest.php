@@ -3,14 +3,18 @@
 namespace Tests\Feature\Api\V1;
 
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Contracts\Telephony\FreeSwitchConferenceGateway;
+use App\Enums\CallLogParticipantStatus;
 use App\Enums\CallMediaType;
 use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
 use App\Enums\CallSessionType;
 use App\Enums\CallStatus;
 use App\Enums\MembershipRole;
+use App\Exceptions\FreeSwitchAddPartyException;
 use App\Jobs\SyncCallRecordingFromVps;
 use App\Models\CallLog;
+use App\Models\CallLogParticipant;
 use App\Models\Department;
 use App\Models\Extension;
 use App\Models\Organization;
@@ -857,6 +861,184 @@ class CallLogApiTest extends TestCase
     }
 
     /** @return array{User, Organization} */
+    public function test_owner_can_add_a_party_to_an_active_call(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+        ]);
+        $destinationExtension = Extension::factory()->for($organization)->create();
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('addParty')
+            ->once()
+            ->withArgs(function (string $callUuid, string $destination, string $callerNumber, string $conferenceName) use ($callLog, $destinationExtension): bool {
+                return $callUuid === 'fs-call-uuid-1234'
+                    && $destination === $destinationExtension->dialableNumber->number
+                    && $callerNumber === $callLog->caller_number
+                    && $conferenceName === 'adhoc-'.$callLog->public_id;
+            })
+            ->andReturn('consultation-uuid-5678');
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $response = $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $destinationExtension->dialableNumber->number],
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('data.conference_name', 'adhoc-'.$callLog->public_id)
+            ->assertJsonCount(1, 'data.participants')
+            ->assertJsonPath('data.participants.0.status', CallLogParticipantStatus::Active->value)
+            ->assertJsonPath('data.participants.0.extension.number', $destinationExtension->dialableNumber->number);
+
+        $callLog->refresh();
+        $this->assertSame('adhoc-'.$callLog->public_id, $callLog->conference_name);
+        $this->assertDatabaseHas('call_log_participants', [
+            'call_log_id' => $callLog->id,
+            'extension_id' => $destinationExtension->id,
+            'added_by_user_id' => $owner->id,
+            'freeswitch_uuid' => 'consultation-uuid-5678',
+            'status' => CallLogParticipantStatus::Active->value,
+        ]);
+    }
+
+    public function test_add_party_rejects_a_destination_outside_the_organization(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+        ]);
+        $outsideExtension = Extension::factory()->create();
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldNotReceive('addParty');
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $outsideExtension->dialableNumber->number],
+        )->assertUnprocessable()
+            ->assertJsonValidationErrors('destination');
+    }
+
+    public function test_add_party_restores_the_original_call_when_the_destination_does_not_answer(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+        ]);
+        $destinationExtension = Extension::factory()->for($organization)->create();
+
+        $gateway = Mockery::mock(FreeSwitchCallGateway::class);
+        $gateway->shouldReceive('addParty')
+            ->once()
+            ->andThrow(new FreeSwitchAddPartyException('The destination could not be reached. The original call has been restored.'));
+        $this->app->instance(FreeSwitchCallGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $destinationExtension->dialableNumber->number],
+        )->assertUnprocessable()
+            ->assertJsonValidationErrors('destination');
+
+        $this->assertDatabaseCount('call_log_participants', 0);
+        $this->assertNull($callLog->refresh()->conference_name);
+    }
+
+    public function test_member_cannot_add_a_party_to_a_call(): void
+    {
+        [$member, $organization] = $this->organizationWithUser(MembershipRole::Member);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+        ]);
+        $destinationExtension = Extension::factory()->for($organization)->create();
+
+        Sanctum::actingAs($member);
+
+        $this->postJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/add-party",
+            ['destination' => $destinationExtension->dialableNumber->number],
+        )->assertForbidden();
+    }
+
+    public function test_owner_can_remove_a_participant_from_a_call(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'conference_name' => 'adhoc-conf-1',
+        ]);
+        $participant = CallLogParticipant::factory()->for($callLog)->create([
+            'extension_id' => Extension::factory()->for($organization)->create()->id,
+            'added_by_user_id' => $owner->id,
+            'freeswitch_uuid' => 'consultation-uuid-5678',
+            'status' => CallLogParticipantStatus::Active,
+            'joined_at' => now(),
+        ]);
+
+        $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+        $gateway->shouldReceive('listMembers')
+            ->once()
+            ->with('adhoc-conf-1')
+            ->andReturn([
+                ['member_id' => '2', 'caller_number' => null, 'caller_name' => null, 'uuid' => 'consultation-uuid-5678'],
+            ]);
+        $gateway->shouldReceive('kickMember')->once()->with('adhoc-conf-1', '2');
+        $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
+
+        Sanctum::actingAs($owner);
+
+        $this->deleteJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}/participants/{$participant->public_id}",
+        )->assertOk();
+
+        $this->assertDatabaseHas('call_log_participants', [
+            'id' => $participant->id,
+            'status' => CallLogParticipantStatus::Left->value,
+        ]);
+        $this->assertNotNull($participant->refresh()->left_at);
+    }
+
+    public function test_ending_a_call_marks_active_participants_as_left(): void
+    {
+        [$owner, $organization] = $this->organizationWithUser(MembershipRole::Owner);
+        $callLog = CallLog::factory()->for($organization)->create([
+            'status' => CallStatus::InProgress->value,
+            'freeswitch_uuid' => 'fs-call-uuid-1234',
+            'conference_name' => 'adhoc-conf-1',
+        ]);
+        $participant = CallLogParticipant::factory()->for($callLog)->create([
+            'extension_id' => Extension::factory()->for($organization)->create()->id,
+            'added_by_user_id' => $owner->id,
+            'status' => CallLogParticipantStatus::Active,
+            'joined_at' => now(),
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        $this->putJson(
+            "/api/v1/organizations/{$organization->public_id}/call-logs/{$callLog->public_id}",
+            ['status' => CallStatus::Completed->value],
+        )->assertOk();
+
+        $this->assertDatabaseHas('call_log_participants', [
+            'id' => $participant->id,
+            'status' => CallLogParticipantStatus::Left->value,
+        ]);
+    }
+
     private function organizationWithUser(MembershipRole $role): array
     {
         $user = User::factory()->create();
