@@ -136,7 +136,13 @@ class SocketFreeSwitchCallGateway implements FreeSwitchCallGateway
         $consultationUuid = null;
 
         try {
-            $otherLegUuid = trim($this->client->api(sprintf('uuid_getvar %s other_leg_uuid', $callUuid)));
+            // Confirmed live via `uuid_dump` against a real bridged call:
+            // this FreeSWITCH build exposes the bridge partner's uuid as
+            // `bridge_uuid` (also `signal_bond`) - `other_leg_uuid` isn't a
+            // real channel variable here at all, which silently returned
+            // empty every time and made every add-party attempt fail with
+            // "no other party to merge with."
+            $otherLegUuid = trim($this->client->api(sprintf('uuid_getvar %s bridge_uuid', $callUuid)));
             if ($otherLegUuid === '' || str_starts_with($otherLegUuid, '-ERR') || $otherLegUuid === '_undef_') {
                 throw new FreeSwitchAddPartyException('This call has no other party to merge with right now.');
             }
