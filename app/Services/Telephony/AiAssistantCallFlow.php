@@ -181,7 +181,7 @@ class AiAssistantCallFlow
         $transcript = $this->transcribeAnswer($session, $field);
         $session->update(['transcript' => trim(($session->transcript ?? '')."\n".$field->key.': '.$transcript)]);
 
-        if (trim($transcript) === '') {
+        if (trim($transcript) === '' || $this->looksHallucinated($transcript)) {
             $session->update(['pending_value' => null, 'answer_ready_at' => now()]);
 
             return;
@@ -487,6 +487,41 @@ class AiAssistantCallFlow
         ])->save();
         $this->appendPlaybackOrSpeak($xml, $condition, $assistant->closing_audio_path, $assistant->closing_message ?: 'Thank you. Goodbye.');
         $this->appendHangup($xml, $condition);
+    }
+
+    /**
+     * Whisper is well known to hallucinate long, repetitive, unrelated
+     * phrases when fed a clip that's mostly noise/silence rather than real
+     * speech - confirmed live (2026-09-21): a noisy-room recording that ran
+     * the full record_max_seconds without silence ever being detected came
+     * back as the same handful of unrelated sentences ("What are you
+     * talking about?") repeated over a dozen times. Extraction (Gemini)
+     * would otherwise still be handed that garbage and asked to guess a
+     * value from it. A real answer, even a long one, essentially never
+     * repeats the exact same sentence several times over - if it does,
+     * this is almost certainly hallucination, not speech, and the caller
+     * should just be asked again rather than risk capturing nonsense.
+     */
+    private function looksHallucinated(string $transcript): bool
+    {
+        $sentences = array_values(array_filter(array_map(
+            fn (string $sentence): string => trim(mb_strtolower($sentence)),
+            preg_split('/(?<=[.?!])\s+|\n+/u', $transcript) ?: [],
+        ), fn (string $sentence): bool => mb_strlen($sentence) >= 4));
+
+        if (count($sentences) < 5) {
+            return false;
+        }
+
+        // Real hallucinations rarely repeat just ONE phrase - the live
+        // example that motivated this had three separate phrases each
+        // repeating (3x, 2x, 6x). Summing every sentence that's part of
+        // ANY repeated group catches that broader pattern; requiring one
+        // dominant phrase at a high ratio missed it by a small margin.
+        $counts = array_count_values($sentences);
+        $repeatedSentenceCount = array_sum(array_filter($counts, fn (int $count): bool => $count >= 2));
+
+        return ($repeatedSentenceCount / count($sentences)) >= 0.5;
     }
 
     private function transcribeAnswer(AiAssistantSession $session, AiAssistantField $field): string

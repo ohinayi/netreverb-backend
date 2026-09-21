@@ -247,6 +247,39 @@ class AiAssistantLiveCallFlowTest extends TestCase
         $this->assertSame(1, $session->retry_count);
     }
 
+    public function test_a_hallucinated_repetitive_transcript_triggers_a_redo_without_extraction(): void
+    {
+        Storage::fake('ai_assistant_recordings');
+        $this->allowXmlCurl();
+        // A real transcript captured live from a noisy-room test where the
+        // recording ran the full record_max_seconds without silence ever
+        // being detected - Whisper hallucinated this instead of hearing
+        // real speech.
+        $hallucinated = "My name is Abdul Jabbar Ibrahim.\n Okay.\n What is it?\n It's all small.\n It's all small.\n"
+            ." It's all small.\n What do you know?\n What are you talking about?\n What are you talking about?\n"
+            ." You know, what are you talking about?\n You know what are you talking about?\n"
+            ." You know what are you talking about?\n You know what are you talking about?\n"
+            ." You know what are you talking about?\n You know what are you talking about?\n"
+            ." You know what are you talking about?";
+        $aiState = $this->fakeAiProviders($hallucinated, 'should-not-be-used');
+        $organization = Organization::factory()->create();
+        $assistant = $this->buildAssistant($organization);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id, 'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress', 'current_field_key' => 'name', 'started_at' => now(),
+        ]);
+        $this->putFakeRecording($session, 'name');
+
+        $response = $this->pollAnswerUntilReady($session->public_id)->assertOk();
+
+        $this->assertStringNotContainsString(AiAssistantCallFlow::CONFIRM_CONTEXT_PREFIX, $response->getContent());
+        $this->assertStringContainsString('What is your name?', $response->getContent());
+        $this->assertNull($aiState->lastInstruction);
+        $session->refresh();
+        $this->assertSame(1, $session->retry_count);
+        $this->assertNull($session->captured_data);
+    }
+
     public function test_exhausting_retries_skips_the_field_with_a_null_value_and_moves_on(): void
     {
         Storage::fake('ai_assistant_recordings');

@@ -42,7 +42,15 @@ return [
         // silence_hits; going quiet for that long ends the recording. These
         // are reasonable defaults but genuinely need tuning against the
         // live FreeSWITCH box/codec rather than trusted blindly.
-        'record_max_seconds' => (int) env('AI_ASSISTANT_RECORD_MAX_SECONDS', 20),
+        // Lowered from 20 (2026-09-21): a live noisy-room test never
+        // triggered silence detection at all and ran the full 20s, and
+        // Whisper hallucinated a long repetitive garbage transcript from
+        // that clip (a well-documented failure mode when it's fed long
+        // stretches of noise) - confirmed via the actual WAV file (exactly
+        // 20.06s) and the session's stored transcript. A lower ceiling
+        // bounds the worst case in a noisy room and feeds Whisper a
+        // shorter, less hallucination-prone clip either way.
+        'record_max_seconds' => (int) env('AI_ASSISTANT_RECORD_MAX_SECONDS', 12),
         // Raised again from 300/2 (2026-09-20, same day) - still too long
         // in a caller's live test, reported as feeling like it's "listening
         // for any other sound" i.e. never confidently deciding they've
