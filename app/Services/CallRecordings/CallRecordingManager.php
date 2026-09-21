@@ -4,6 +4,7 @@ namespace App\Services\CallRecordings;
 
 use App\Contracts\Recordings\CallRecordingStorage;
 use App\Contracts\Telephony\FreeSwitchCallGateway;
+use App\Contracts\Telephony\FreeSwitchConferenceGateway;
 use App\Data\CallRecordingProfile;
 use App\Enums\CallRecordingMediaType;
 use App\Enums\CallRecordingStatus;
@@ -27,6 +28,7 @@ class CallRecordingManager
     public function __construct(
         private readonly CallRecordingStorage $storage,
         private readonly FreeSwitchCallGateway $gateway,
+        private readonly FreeSwitchConferenceGateway $conferenceGateway,
         private readonly Dispatcher $dispatcher,
         private readonly DirectVideoRecordingMuxer $directVideoRecordingMuxer,
     ) {}
@@ -104,7 +106,17 @@ class CallRecordingManager
                 'recording_container' => $profile->container,
             ]);
 
-            $this->gateway->startRecording($callUuid, $absolutePath, $profile);
+            // uuid_record on a leg that's now a conference member only
+            // captures that one channel's own audio, not the full mix -
+            // live-confirmed report: a 3-way call's recording only had the
+            // person who started it audible, no one else. mod_conference's
+            // own recording command records the actual mixed audio of every
+            // member instead.
+            if ($callLog->conference_name !== null) {
+                $this->conferenceGateway->startRecording($callLog->conference_name, $absolutePath);
+            } else {
+                $this->gateway->startRecording($callUuid, $absolutePath, $profile);
+            }
             $callLog->forceFill([
                 'recording_status' => CallRecordingStatus::Recording,
             ])->save();
@@ -249,7 +261,11 @@ class CallRecordingManager
                 'recording_container' => $profile->container,
             ]);
 
-            $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath, $profile);
+            if ($callLog->conference_name !== null) {
+                $this->conferenceGateway->stopRecording($callLog->conference_name, $absolutePath);
+            } else {
+                $this->gateway->stopRecording($callLog->recording_uuid, $absolutePath, $profile);
+            }
             $this->finalizeStoppedRecording($callLog, $startedAt, $endedAt);
         } catch (FreeSwitchRecordingException $exception) {
             if ($this->sessionAlreadyEnded($exception)) {

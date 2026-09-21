@@ -1079,13 +1079,15 @@ class CallLogApiTest extends TestCase
         ]);
 
         $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+        // Called once to resolve the participant's own member id, and again
+        // by the "don't leave the last person alone" check afterward.
         $gateway->shouldReceive('listMembers')
-            ->once()
+            ->twice()
             ->with('adhoc-conf-1')
             ->andReturn([
                 ['member_id' => '2', 'caller_number' => null, 'caller_name' => null, 'uuid' => 'consultation-uuid-5678'],
             ]);
-        $gateway->shouldReceive('kickMember')->once()->with('adhoc-conf-1', '2');
+        $gateway->shouldReceive('kickMember')->twice()->with('adhoc-conf-1', '2');
         $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
 
         Sanctum::actingAs($owner);
@@ -1112,9 +1114,19 @@ class CallLogApiTest extends TestCase
         $participant = CallLogParticipant::factory()->for($callLog)->create([
             'extension_id' => Extension::factory()->for($organization)->create()->id,
             'added_by_user_id' => $owner->id,
+            'freeswitch_uuid' => 'consultation-uuid-ending',
             'status' => CallLogParticipantStatus::Active,
             'joined_at' => now(),
         ]);
+
+        $gateway = Mockery::mock(FreeSwitchConferenceGateway::class);
+        $gateway->shouldReceive('listMembers')
+            ->with('adhoc-conf-1')
+            ->andReturn([
+                ['member_id' => '2', 'caller_number' => null, 'caller_name' => null, 'uuid' => 'consultation-uuid-ending'],
+            ]);
+        $gateway->shouldReceive('kickMember')->with('adhoc-conf-1', '2');
+        $this->app->instance(FreeSwitchConferenceGateway::class, $gateway);
 
         Sanctum::actingAs($owner);
 

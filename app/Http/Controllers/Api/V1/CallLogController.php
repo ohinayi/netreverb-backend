@@ -295,14 +295,11 @@ class CallLogController extends Controller
         }
 
         if ($participant->status === CallLogParticipantStatus::Active && $callLog->conference_name !== null) {
-            $memberId = $this->resolveConferenceMemberId($callLog->conference_name, $participant->freeswitch_uuid);
-
-            if ($memberId !== null) {
-                $this->conferenceGateway->kickMember($callLog->conference_name, $memberId);
-            }
+            $this->removeParticipantFromConference($participant, $callLog->conference_name);
+            $this->endConferenceIfAloneOrEmpty($callLog->conference_name);
+        } else {
+            $participant->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
         }
-
-        $participant->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
 
         Log::info('Participant removed from active call.', [
             'call_log_id' => $callLog->public_id,
@@ -334,6 +331,39 @@ class CallLogController extends Controller
                     ->orWhere(['requester_id' => $otherUserId, 'addressee_id' => $userId]);
             })
             ->exists();
+    }
+
+    private function removeParticipantFromConference(CallLogParticipant $participant, string $conferenceName): void
+    {
+        $memberId = $this->resolveConferenceMemberId($conferenceName, $participant->freeswitch_uuid);
+
+        if ($memberId !== null) {
+            $this->conferenceGateway->kickMember($conferenceName, $memberId);
+        }
+
+        $participant->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
+    }
+
+    /**
+     * A conference doesn't end itself just because it's down to one member -
+     * that person has no one left to talk to, so treat "alone" the same as
+     * "empty" and disconnect them too instead of leaving them sitting there.
+     */
+    private function endConferenceIfAloneOrEmpty(string $conferenceName): void
+    {
+        $members = $this->conferenceGateway->listMembers($conferenceName);
+
+        if (count($members) > 1) {
+            return;
+        }
+
+        foreach ($members as $member) {
+            $memberId = $member['member_id'] ?? null;
+
+            if (is_string($memberId) && $memberId !== '') {
+                $this->conferenceGateway->kickMember($conferenceName, $memberId);
+            }
+        }
     }
 
     private function resolveConferenceMemberId(string $conferenceName, ?string $freeswitchUuid): ?string
@@ -482,9 +512,23 @@ class CallLogController extends Controller
         }
 
         if ($callLog->conference_name !== null && $this->isTerminalCallStatus($callLog->status)) {
-            $callLog->participants()
+            // Ending a CallLog row only ends THAT party's own leg - unlike a
+            // plain 2-way bridge (where one side hanging up naturally drops
+            // the other), a conference member's channel stays open with no
+            // signal telling them anything happened. Live-confirmed report:
+            // the last remaining person was left sitting in the call after
+            // everyone else ended theirs. Actually kick each still-active
+            // added participant's real channel, not just the DB row, then
+            // check whether that leaves a single, now-alone member behind.
+            $activeParticipants = $callLog->participants()
                 ->where('status', CallLogParticipantStatus::Active)
-                ->update(['status' => CallLogParticipantStatus::Left, 'left_at' => now()]);
+                ->get();
+
+            foreach ($activeParticipants as $activeParticipant) {
+                $this->removeParticipantFromConference($activeParticipant, $callLog->conference_name);
+            }
+
+            $this->endConferenceIfAloneOrEmpty($callLog->conference_name);
         }
 
         $callLog = $this->recordingManager->reconcileCompletedRecordingMetadata($callLog);
