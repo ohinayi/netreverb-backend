@@ -50,9 +50,16 @@ class AiAssistantRealtimeCallFlow
         $port = (int) config('telephony.ai_assistant_realtime.bridge_port');
         $wsUrl = sprintf('ws://%s:%d/session/%s', $host, $port, $session->bridge_session_token);
 
+        // The trailing ${uuid} is mod_audio_stream's optional metadata
+        // argument - it sends that value as the very first text message
+        // over the WebSocket before any binary audio frames, which is the
+        // only way the bridge learns this call's real FreeSWITCH channel
+        // UUID (needed for uuid_break on barge-in and uuid_kill at the end
+        // - neither is available to this PHP class, since ${uuid} only
+        // resolves inside FreeSWITCH itself when it executes this action).
         $action = $condition->appendChild($xml->createElement('action'));
         $action->setAttribute('application', 'api');
-        $action->setAttribute('data', sprintf('uuid_audio_stream ${uuid} start %s mono 16k', $wsUrl));
+        $action->setAttribute('data', sprintf('uuid_audio_stream ${uuid} start %s mono 16k ${uuid}', $wsUrl));
     }
 
     /**
