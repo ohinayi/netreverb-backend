@@ -4,7 +4,11 @@ return [
     'driver' => env('IVR_TTS_DRIVER', 'piper'),
     'piper' => [
         'binary' => env('PIPER_BINARY', '/opt/piper/venv/bin/piper'),
-        'model' => env('PIPER_MODEL', '/opt/piper/voices/en_US-lessac-medium.onnx'),
+        // British English is the closest available Piper voice to a
+        // Nigerian accent - no Nigerian-accented voice exists in Piper's
+        // catalog at all (confirmed against the official voice list); a
+        // real Nigerian voice would need training a custom model.
+        'model' => env('PIPER_MODEL', '/opt/piper/voices/en_GB-alan-medium.onnx'),
         'length_scale' => env('PIPER_LENGTH_SCALE', '1.0'),
         'output_disk' => env('PIPER_OUTPUT_DISK', 'public'),
         'voices' => [
