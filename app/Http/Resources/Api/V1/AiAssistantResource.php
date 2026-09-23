@@ -15,6 +15,7 @@ class AiAssistantResource extends JsonResource
             'name' => $this->name,
             'extension_id' => $this->when($this->extension !== null, $this->extension?->public_id),
             'enabled' => $this->enabled,
+            'response_mode' => $this->response_mode,
             'language' => $this->language,
             'tts_voice' => $this->tts_voice,
             'welcome_message' => $this->welcome_message,

@@ -87,6 +87,21 @@ return [
             'password' => env('AI_ASSISTANT_RECORDINGS_SYNC_PASSWORD', env('FREESWITCH_CALL_RECORDINGS_SYNC_PASSWORD')),
         ],
     ],
+    // Speech-to-speech mode (Gemini Live via FreeSWITCH's mod_audio_stream
+    // and a separate Node.js bridge process on the same box). This never
+    // touches the turn-based ai_assistant flow above - it's a completely
+    // separate code path, opt-in per assistant via response_mode.
+    'ai_assistant_realtime' => [
+        // The bridge always runs on the same box as FreeSWITCH (mod_audio_stream
+        // opens its own WebSocket directly to it), so this is always localhost.
+        'bridge_host' => env('AI_ASSISTANT_REALTIME_BRIDGE_HOST', '127.0.0.1'),
+        'bridge_port' => (int) env('AI_ASSISTANT_REALTIME_BRIDGE_PORT', 8022),
+        // Shared secret the bridge sends back to Laravel's internal
+        // session-config/session-complete endpoints - same trust model as
+        // freeswitch.xml_curl_token, checked with hash_equals() and an IP
+        // allowlist restricted to 127.0.0.1 since the bridge is always local.
+        'bridge_token' => env('AI_ASSISTANT_REALTIME_BRIDGE_TOKEN'),
+    ],
     'voicemail' => [
         'disk' => env('VOICEMAIL_RECORDINGS_DISK', 'freeswitch_voicemails'),
         // Same convention as ai_assistant.base_path above - this must be a

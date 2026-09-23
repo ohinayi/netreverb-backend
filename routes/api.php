@@ -59,6 +59,7 @@ use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Controllers\FreeSwitchDialplanController;
 use App\Http\Controllers\FreeSwitchDialplanRouterController;
+use App\Http\Controllers\RealtimeBridgeSessionController;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
@@ -70,6 +71,15 @@ Route::match(['get', 'post'], 'freeswitch/dialplan.xml', FreeSwitchDialplanContr
     ->name('freeswitch.dialplan.configuration');
 Route::match(['get', 'post'], 'freeswitch/dialplan-router.xml', FreeSwitchDialplanRouterController::class)
     ->name('freeswitch.dialplan.router');
+
+// Internal-only - the separate Node.js realtime-bridge process (same trust
+// model as the FreeSWITCH XML-cURL routes above: token + loopback-only IP
+// allowlist, enforced in the controller since the bridge always runs on
+// this same box).
+Route::get('internal/realtime-bridge/sessions/{token}', [RealtimeBridgeSessionController::class, 'show'])
+    ->name('internal.realtime-bridge.session.show');
+Route::post('internal/realtime-bridge/sessions/{token}/complete', [RealtimeBridgeSessionController::class, 'complete'])
+    ->name('internal.realtime-bridge.session.complete');
 
 Route::prefix('v1')->group(function (): void {
     Route::post('payments/webhooks/{provider}', PaymentWebhookController::class)

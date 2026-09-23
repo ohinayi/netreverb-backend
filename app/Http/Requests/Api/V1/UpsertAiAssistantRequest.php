@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Enums\AiAssistantResponseMode;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -20,6 +21,7 @@ class UpsertAiAssistantRequest extends FormRequest
             'name' => ['required', 'string', 'min:2', 'max:120'],
             'extension_public_id' => ['nullable', 'string', 'max:26'],
             'enabled' => ['sometimes', 'boolean'],
+            'response_mode' => ['sometimes', Rule::enum(AiAssistantResponseMode::class)],
             'language' => ['sometimes', 'string', 'max:16'],
             'tts_voice' => ['sometimes', 'nullable', 'string', Rule::in(array_keys(config('tts.piper.voices', [])))],
             'welcome_message' => ['sometimes', 'nullable', 'string', 'max:2000'],

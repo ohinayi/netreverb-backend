@@ -59,7 +59,7 @@ class AiAssistantController extends Controller
         Gate::authorize('update', $organization);
         abort_unless($aiAssistant->organization_id === $organization->id, 404);
         $attributes = $request->validated();
-        $before = $aiAssistant->only(['name', 'extension_id', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']);
+        $before = $aiAssistant->only(['name', 'extension_id', 'enabled', 'response_mode', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']);
 
         DB::transaction(function () use ($aiAssistant, $organization, $attributes): void {
             $aiAssistant->update($this->assistantAttributes($organization, $attributes));
@@ -69,7 +69,7 @@ class AiAssistantController extends Controller
         });
         SynthesizeAiAssistantQuestions::dispatch($aiAssistant->id);
         $fresh = $aiAssistant->fresh()->load($this->relations());
-        $this->auditLogger->record($request, $request->user(), $organization, 'ai_assistant.updated', $fresh, $before, $fresh->only(['name', 'extension_id', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']));
+        $this->auditLogger->record($request, $request->user(), $organization, 'ai_assistant.updated', $fresh, $before, $fresh->only(['name', 'extension_id', 'enabled', 'response_mode', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']));
 
         return AiAssistantResource::make($fresh);
     }
@@ -132,7 +132,7 @@ class AiAssistantController extends Controller
         }
 
         return [
-            ...Arr::only($attributes, ['name', 'enabled', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']),
+            ...Arr::only($attributes, ['name', 'enabled', 'response_mode', 'language', 'tts_voice', 'welcome_message', 'closing_message', 'system_instruction', 'knowledge', 'handoff_rules']),
             'extension_id' => $extensionId,
         ];
     }

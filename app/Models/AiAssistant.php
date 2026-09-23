@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AiAssistantResponseMode;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,9 +13,9 @@ class AiAssistant extends Model
 {
     use BelongsToWorkspace, HasUlids, SoftDeletes;
 
-    protected $fillable = ['organization_id', 'workspace_id', 'extension_id', 'name', 'enabled', 'language', 'tts_voice', 'welcome_message', 'welcome_audio_path', 'closing_message', 'closing_audio_path', 'system_instruction', 'knowledge', 'handoff_rules'];
+    protected $fillable = ['organization_id', 'workspace_id', 'extension_id', 'name', 'enabled', 'response_mode', 'language', 'tts_voice', 'welcome_message', 'welcome_audio_path', 'closing_message', 'closing_audio_path', 'system_instruction', 'knowledge', 'handoff_rules'];
 
-    protected $attributes = ['enabled' => false, 'language' => 'en'];
+    protected $attributes = ['enabled' => false, 'response_mode' => 'turn_based', 'language' => 'en'];
 
     public function uniqueIds(): array
     {
@@ -48,6 +49,6 @@ class AiAssistant extends Model
 
     protected function casts(): array
     {
-        return ['enabled' => 'boolean', 'knowledge' => 'array', 'handoff_rules' => 'array'];
+        return ['enabled' => 'boolean', 'response_mode' => AiAssistantResponseMode::class, 'knowledge' => 'array', 'handoff_rules' => 'array'];
     }
 }

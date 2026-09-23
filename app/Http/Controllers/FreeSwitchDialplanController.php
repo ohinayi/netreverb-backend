@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AiAssistantResponseMode;
 use App\Enums\ServiceNumberType;
 use App\Models\AiAssistant;
 use App\Models\ConferenceRoom;
@@ -11,6 +12,7 @@ use App\Models\OrganizationIvr;
 use App\Models\OrganizationIvrOption;
 use App\Models\ServiceNumber;
 use App\Services\Telephony\AiAssistantCallFlow;
+use App\Services\Telephony\AiAssistantRealtimeCallFlow;
 use App\Services\Telephony\PiperTtsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -20,6 +22,7 @@ class FreeSwitchDialplanController extends Controller
 {
     public function __construct(
         private readonly AiAssistantCallFlow $aiAssistantCallFlow,
+        private readonly AiAssistantRealtimeCallFlow $aiAssistantRealtimeCallFlow,
         private readonly PiperTtsService $piper,
     ) {}
 
@@ -190,6 +193,8 @@ class FreeSwitchDialplanController extends Controller
                 $optionsContext->setAttribute('name', $this->optionsContextName($ivr));
                 $this->appendOptionExtensions($xml, $optionsContext, $section, $options, $ivr->organization);
             }
+        } elseif ($assistant && $assistant->response_mode === AiAssistantResponseMode::SpeechToSpeech) {
+            $this->aiAssistantRealtimeCallFlow->emitEntry($xml, $condition, $assistant);
         } elseif ($assistant) {
             $this->aiAssistantCallFlow->emitEntry($xml, $condition, $assistant);
         } elseif ($voicemailExtension) {
