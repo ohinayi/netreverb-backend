@@ -61,6 +61,9 @@ class FreeSwitchDialplanController extends Controller
         if (str_starts_with($contextName, AiAssistantCallFlow::DTMF_CONTEXT_PREFIX)) {
             return $this->aiAssistantCallFlow->handleDtmfAnswer($request, $contextName);
         }
+        if (str_starts_with($contextName, AiAssistantRealtimeCallFlow::START_CONTEXT_PREFIX)) {
+            return $this->aiAssistantRealtimeCallFlow->handleStart($request, $contextName);
+        }
 
         $number = (string) ($request->input('destination_number') ?: $request->input('Caller-Destination-Number'));
 

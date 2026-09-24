@@ -8,7 +8,10 @@ use App\Models\AiAssistant;
 use App\Models\AiAssistantSession;
 use App\Models\Organization;
 use App\Models\ServiceNumber;
+use App\Services\Telephony\AiAssistantRealtimeCallFlow;
+use App\Services\Telephony\FreeSwitchEventSocketClient;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 class AiAssistantRealtimeCallFlowTest extends TestCase
@@ -32,7 +35,7 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         ])->load('dialableNumber');
     }
 
-    public function test_dialing_a_speech_to_speech_assistant_starts_the_audio_stream_and_parks(): void
+    public function test_dialing_a_speech_to_speech_assistant_answers_and_transfers_to_the_start_context(): void
     {
         $this->allowXmlCurl();
         $organization = Organization::factory()->create();
@@ -53,13 +56,15 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         $response->assertOk();
         $xml = $response->getContent();
         $this->assertStringContainsString('application="answer"', $xml);
-        $this->assertStringContainsString('application="api"', $xml);
-        // `expand:` is required - FreeSWITCH's `api` application does not
-        // auto-expand ${uuid}, confirmed live in production (see
-        // AiAssistantRealtimeCallFlow's docblock for the exact incident).
-        $this->assertStringContainsString('expand:uuid_audio_stream ${uuid} start ws://127.0.0.1:8022/session/', $xml);
-        $this->assertStringContainsString('mono 16k', $xml);
-        $this->assertStringContainsString('application="park"', $xml);
+        // No `uuid_audio_stream` here at all - FreeSWITCH doesn't register
+        // `application="api"` as a valid dialplan application (confirmed
+        // live: "Invalid Application api" -> immediate hangup), so the
+        // stream is started from a second re-fetch instead, once the
+        // channel is definitely live. See AiAssistantRealtimeCallFlow's
+        // class docblock for the full incident.
+        $this->assertStringNotContainsString('uuid_audio_stream', $xml);
+        $this->assertStringContainsString('application="transfer"', $xml);
+        $this->assertStringContainsString(AiAssistantRealtimeCallFlow::START_CONTEXT_PREFIX, $xml);
         // The turn-based flow's record/read/DTMF-question machinery must
         // never appear for a speech-to-speech assistant.
         $this->assertStringNotContainsString('application="record"', $xml);
@@ -69,7 +74,73 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         $this->assertSame('in_progress', $session->status);
         $this->assertSame(AiAssistantResponseMode::SpeechToSpeech, $session->mode);
         $this->assertNotEmpty($session->bridge_session_token);
-        $this->assertStringContainsString($session->bridge_session_token, $xml);
+        $this->assertStringContainsString($session->public_id, $xml);
+    }
+
+    public function test_the_start_context_refetch_starts_the_stream_over_esl_and_parks(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Realtime Intake',
+            'enabled' => true,
+            'response_mode' => AiAssistantResponseMode::SpeechToSpeech->value,
+        ]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id,
+            'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress',
+            'mode' => AiAssistantResponseMode::SpeechToSpeech->value,
+            'bridge_session_token' => 'a-real-token',
+            'started_at' => now(),
+        ]);
+
+        $client = Mockery::mock(FreeSwitchEventSocketClient::class);
+        $client->shouldReceive('api')
+            ->once()
+            ->with(Mockery::on(fn (string $command) => str_starts_with($command, 'uuid_audio_stream test-channel-uuid start ws://127.0.0.1:8022/session/a-real-token mono 16k test-channel-uuid')))
+            ->andReturn('+OK Success');
+        $this->app->instance(FreeSwitchEventSocketClient::class, $client);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantRealtimeCallFlow::START_CONTEXT_PREFIX.$session->public_id.'&Unique-ID=test-channel-uuid'
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('application="park"', $xml);
+    }
+
+    public function test_the_start_context_refetch_hangs_up_when_the_stream_fails_to_start(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        $assistant = AiAssistant::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Realtime Intake',
+            'enabled' => true,
+            'response_mode' => AiAssistantResponseMode::SpeechToSpeech->value,
+        ]);
+        $session = AiAssistantSession::query()->create([
+            'organization_id' => $organization->id,
+            'ai_assistant_id' => $assistant->id,
+            'status' => 'in_progress',
+            'mode' => AiAssistantResponseMode::SpeechToSpeech->value,
+            'bridge_session_token' => 'a-real-token',
+            'started_at' => now(),
+        ]);
+
+        $client = Mockery::mock(FreeSwitchEventSocketClient::class);
+        $client->shouldReceive('api')->once()->andReturn('-ERR no reply');
+        $this->app->instance(FreeSwitchEventSocketClient::class, $client);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&context='.AiAssistantRealtimeCallFlow::START_CONTEXT_PREFIX.$session->public_id.'&Unique-ID=test-channel-uuid'
+        );
+
+        $response->assertOk();
+        $this->assertStringContainsString('application="hangup"', $response->getContent());
     }
 
     public function test_dialing_a_turn_based_assistant_still_uses_the_existing_flow(): void
