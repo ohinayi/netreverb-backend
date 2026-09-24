@@ -40,9 +40,14 @@ class AiAssistantRealtimeCallFlow
 
     /**
      * FreeSWITCH's own `api` dialplan application runs the exact same
-     * uuid_audio_stream command as if it came over ESL, with ${uuid}
-     * resolved to this channel's real UUID at execution time - no PHP-side
-     * ESL round-trip needed just to start the stream.
+     * uuid_audio_stream command as if it came over ESL - but, confirmed
+     * live via the FreeSWITCH log during the very first real test call,
+     * `api` does NOT expand ${uuid}/channel variables in its data string
+     * the way most other dialplan applications do (the log showed the
+     * literal, unexpanded string "${uuid}" sent to uuid_audio_stream,
+     * which is why that first live test produced no audio at all - the
+     * stream never started). The documented fix is the `expand:` prefix,
+     * which tells `api` to run channel-variable substitution first.
      */
     private function appendStartStream(\DOMDocument $xml, \DOMElement $condition, AiAssistantSession $session): void
     {
@@ -59,7 +64,7 @@ class AiAssistantRealtimeCallFlow
         // resolves inside FreeSWITCH itself when it executes this action).
         $action = $condition->appendChild($xml->createElement('action'));
         $action->setAttribute('application', 'api');
-        $action->setAttribute('data', sprintf('uuid_audio_stream ${uuid} start %s mono 16k ${uuid}', $wsUrl));
+        $action->setAttribute('data', sprintf('expand:uuid_audio_stream ${uuid} start %s mono 16k ${uuid}', $wsUrl));
     }
 
     /**

@@ -54,7 +54,10 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         $xml = $response->getContent();
         $this->assertStringContainsString('application="answer"', $xml);
         $this->assertStringContainsString('application="api"', $xml);
-        $this->assertStringContainsString('uuid_audio_stream ${uuid} start ws://127.0.0.1:8022/session/', $xml);
+        // `expand:` is required - FreeSWITCH's `api` application does not
+        // auto-expand ${uuid}, confirmed live in production (see
+        // AiAssistantRealtimeCallFlow's docblock for the exact incident).
+        $this->assertStringContainsString('expand:uuid_audio_stream ${uuid} start ws://127.0.0.1:8022/session/', $xml);
         $this->assertStringContainsString('mono 16k', $xml);
         $this->assertStringContainsString('application="park"', $xml);
         // The turn-based flow's record/read/DTMF-question machinery must
