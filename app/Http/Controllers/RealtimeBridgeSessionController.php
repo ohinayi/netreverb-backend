@@ -87,6 +87,19 @@ class RealtimeBridgeSessionController extends Controller
     {
         $token = (string) config('telephony.ai_assistant_realtime.bridge_token');
         abort_if($token === '' || ! hash_equals($token, (string) $request->query('token')), Response::HTTP_FORBIDDEN);
-        abort_unless(in_array($request->ip(), ['127.0.0.1', '::1'], true), Response::HTTP_FORBIDDEN);
+
+        // The bridge calls back over LARAVEL_BASE_URL, which is the public
+        // domain (needed for TLS) - even same-box, that round-trips out
+        // through the public interface, so nginx sees the box's own public
+        // IP as REMOTE_ADDR, not 127.0.0.1. A hardcoded loopback-only check
+        // rejected every real bridge request with a 403, which is what
+        // killed the call immediately after mod_audio_stream started
+        // (confirmed live: bridge log showed "Failed to fetch session
+        // config (HTTP 403)" right after "Call UUID", followed by the
+        // bridge closing the stream and FreeSWITCH hanging up). Reusing the
+        // XML-cURL allowlist here is correct, not a workaround - it already
+        // solves this exact same-box-via-public-interface case for
+        // FreeSwitchDialplanController.
+        abort_unless(in_array($request->ip(), config('telephony.freeswitch.xml_curl_allowed_ips', []), true), Response::HTTP_FORBIDDEN);
     }
 }
