@@ -5,8 +5,10 @@ namespace App\Services\Telephony;
 use App\Enums\AiAssistantResponseMode;
 use App\Models\AiAssistant;
 use App\Models\AiAssistantSession;
+use App\Services\Ai\AiCreditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -36,10 +38,24 @@ class AiAssistantRealtimeCallFlow
 {
     public const START_CONTEXT_PREFIX = 'ai-assistant-realtime-start-';
 
-    public function __construct(private readonly FreeSwitchEventSocketClient $client) {}
+    public function __construct(
+        private readonly FreeSwitchEventSocketClient $client,
+        private readonly AiCreditService $credits,
+        private readonly PiperTtsService $piper,
+    ) {}
 
     public function emitEntry(\DOMDocument $xml, \DOMElement $condition, AiAssistant $assistant): void
     {
+        // Speech-to-speech calls cost real money (Gemini Live), unlike the
+        // turn-based flow (self-hosted, near-zero marginal cost) - this is
+        // the only place that ever gates on AI credit balance.
+        // AiAssistantCallFlow (turn-based) is never touched by billing.
+        if (! $this->credits->hasSufficientBalance($assistant->organization)) {
+            $this->appendInsufficientCreditMessage($xml, $condition);
+
+            return;
+        }
+
         $session = AiAssistantSession::query()->create([
             'organization_id' => $assistant->organization_id,
             'ai_assistant_id' => $assistant->id,
@@ -181,6 +197,39 @@ class AiAssistantRealtimeCallFlow
         $action = $condition->appendChild($xml->createElement('action'));
         $action->setAttribute('application', 'hangup');
         $action->setAttribute('data', 'NORMAL_CLEARING');
+    }
+
+    /**
+     * Deliberately generic wording - the caller is the org's own customer,
+     * not the org itself, so this must never say anything about billing
+     * or credit balance. Mirrors FreeSwitchDialplanController's
+     * appendUnavailableMessage() (Piper-cached, flite fallback).
+     */
+    private function appendInsufficientCreditMessage(\DOMDocument $xml, \DOMElement $condition): void
+    {
+        $text = 'This service is temporarily unavailable. Please try again later.';
+        $relativePath = 'system-prompts/ai-unavailable.wav';
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            $this->piper->generate($text, $relativePath);
+        }
+
+        if ($disk->exists($relativePath)) {
+            $audioBaseUrl = (string) config('telephony.freeswitch.ivr_audio_base_url', '');
+            $audioPath = $audioBaseUrl !== ''
+                ? $audioBaseUrl.'/storage/'.ltrim($relativePath, '/')
+                : storage_path('app/public/'.$relativePath);
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'playback');
+            $action->setAttribute('data', $audioPath);
+        } else {
+            $action = $condition->appendChild($xml->createElement('action'));
+            $action->setAttribute('application', 'speak');
+            $action->setAttribute('data', 'flite|slt|'.$text);
+        }
+
+        $this->appendHangup($xml, $condition);
     }
 
     /** @return array{0: \DOMDocument, 1: \DOMElement, 2: \DOMElement} document, context, and a catch-all condition to append actions into */

@@ -8,6 +8,7 @@ use App\Models\AiAssistant;
 use App\Models\AiAssistantSession;
 use App\Models\Organization;
 use App\Models\ServiceNumber;
+use App\Services\Ai\AiCreditService;
 use App\Services\Telephony\AiAssistantRealtimeCallFlow;
 use App\Services\Telephony\FreeSwitchEventSocketClient;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -39,6 +40,7 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
     {
         $this->allowXmlCurl();
         $organization = Organization::factory()->create();
+        app(AiCreditService::class)->wallet($organization)->update(['balance_units' => 10]);
         $assistant = AiAssistant::query()->create([
             'organization_id' => $organization->id,
             'name' => 'Realtime Intake',
@@ -75,6 +77,30 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         $this->assertSame(AiAssistantResponseMode::SpeechToSpeech, $session->mode);
         $this->assertNotEmpty($session->bridge_session_token);
         $this->assertStringContainsString($session->public_id, $xml);
+    }
+
+    public function test_dialing_a_speech_to_speech_assistant_with_no_ai_credit_hangs_up_instead(): void
+    {
+        $this->allowXmlCurl();
+        $organization = Organization::factory()->create();
+        // No wallet top-up - a fresh org's AI credit balance defaults to 0.
+        $assistant = AiAssistant::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Realtime Intake',
+            'enabled' => true,
+            'response_mode' => AiAssistantResponseMode::SpeechToSpeech->value,
+        ]);
+        $service = $this->serviceNumberFor($assistant);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])->get(
+            '/api/freeswitch/dialplan.xml?token=test-token&destination_number='.$service->dialableNumber->number
+        );
+
+        $response->assertOk();
+        $xml = $response->getContent();
+        $this->assertStringContainsString('application="hangup"', $xml);
+        $this->assertStringNotContainsString('application="transfer"', $xml);
+        $this->assertSame(0, AiAssistantSession::query()->count());
     }
 
     public function test_the_start_context_refetch_starts_the_stream_over_esl_and_parks(): void
@@ -252,5 +278,8 @@ class AiAssistantRealtimeCallFlowTest extends TestCase
         $this->assertSame(42, $session->duration_seconds);
         $this->assertSame(['model' => 'gemini-3.8-live'], $session->provider_metadata);
         $this->assertNotNull($session->completed_at);
+        // 42 seconds rounds up to 1 billed minute; a fresh org has no
+        // credit, so this is allowed to go negative rather than throw.
+        $this->assertSame(-1, app(AiCreditService::class)->wallet($organization)->fresh()->balance_units);
     }
 }

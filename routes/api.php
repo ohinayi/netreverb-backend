@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AiAssistantController;
+use App\Http\Controllers\Api\V1\AiCreditWalletController;
 use App\Http\Controllers\Api\V1\AuditEventController;
 use App\Http\Controllers\Api\V1\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Api\V1\Auth\CompleteOrganizationController;
@@ -48,6 +49,7 @@ use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
 use App\Http\Controllers\Api\V1\SmsWalletController;
+use App\Http\Controllers\Api\V1\SuperAdminAiCreditsController;
 use App\Http\Controllers\Api\V1\SuperAdminAnalyticsController;
 use App\Http\Controllers\Api\V1\SuperAdminOperationsController;
 use App\Http\Controllers\Api\V1\SuperAdminPackagesController;
@@ -165,6 +167,14 @@ Route::prefix('v1')->group(function (): void {
                 'super-admin/sms/purchases/{smsCreditPurchase}/complete',
                 [SuperAdminSmsController::class, 'completePurchase'],
             )->name('super-admin.sms.purchases.complete');
+            Route::get('super-admin/ai-credits', [SuperAdminAiCreditsController::class, 'index'])
+                ->name('super-admin.ai-credits.index');
+            Route::patch('super-admin/ai-credits/pricing', [SuperAdminAiCreditsController::class, 'updatePricing'])
+                ->name('super-admin.ai-credits.pricing.update');
+            Route::post(
+                'super-admin/ai-credits/purchases/{aiCreditPurchase}/complete',
+                [SuperAdminAiCreditsController::class, 'completePurchase'],
+            )->name('super-admin.ai-credits.purchases.complete');
             Route::get('super-admin/packages', [SuperAdminPackagesController::class, 'index'])
                 ->name('super-admin.packages.index');
             Route::post('super-admin/packages/voices/{voice}/download', [SuperAdminPackagesController::class, 'downloadVoice'])
@@ -300,6 +310,11 @@ Route::prefix('v1')->group(function (): void {
                     ->name('organizations.outbound-messaging.index');
                 Route::get('organizations/{organization}/sms-wallet', [SmsWalletController::class, 'show'])
                     ->name('organizations.sms-wallet.show');
+                Route::get('organizations/{organization}/ai-credit-wallet', [AiCreditWalletController::class, 'show'])
+                    ->name('organizations.ai-credit-wallet.show');
+                Route::post('organizations/{organization}/ai-credit-wallet/purchases', [AiCreditWalletController::class, 'requestPurchase'])
+                    ->middleware('throttle:10,1')
+                    ->name('organizations.ai-credit-wallet.purchases.store');
                 Route::post('organizations/{organization}/sms-wallet/purchases', [SmsWalletController::class, 'requestPurchase'])
                     ->middleware('throttle:10,1')
                     ->name('organizations.sms-wallet.purchases.store');

@@ -40,6 +40,11 @@ class OrganizationPolicy
         return $this->canManageWorkspaceFeature($user, $organization);
     }
 
+    public function manageAiCredits(User $user, Organization $organization): bool
+    {
+        return $this->canManageWorkspaceFeature($user, $organization);
+    }
+
     /**
      * Issuing a credential that can read every call log in the org is
      * higher-trust than telephony config, and a partner integration is an

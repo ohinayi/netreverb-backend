@@ -158,6 +158,16 @@ class Organization extends Model
         return $this->hasMany(SmsCreditPurchase::class);
     }
 
+    public function aiCreditWallet(): HasOne
+    {
+        return $this->hasOne(AiCreditWallet::class);
+    }
+
+    public function aiCreditPurchases(): HasMany
+    {
+        return $this->hasMany(AiCreditPurchase::class);
+    }
+
     public function pricingGroup(): BelongsTo
     {
         return $this->belongsTo(PricingGroup::class);

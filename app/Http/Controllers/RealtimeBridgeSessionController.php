@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiAssistantResponseMode;
 use App\Models\AiAssistantSession;
+use App\Services\Ai\AiCreditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\Log;
  */
 class RealtimeBridgeSessionController extends Controller
 {
+    public function __construct(private readonly AiCreditService $credits) {}
+
     public function show(Request $request, string $token): JsonResponse
     {
         $this->authorizeBridgeRequest($request);
@@ -74,10 +77,14 @@ class RealtimeBridgeSessionController extends Controller
             'completed_at' => now(),
         ])->save();
 
+        $transaction = $this->credits->debitForSession($session);
+
         Log::info('Realtime AI assistant session completed.', [
             'session_id' => $session->public_id,
             'status' => $data['status'],
             'duration_seconds' => $data['duration_seconds'] ?? null,
+            'ai_credit_units_billed' => $transaction ? abs($transaction->units) : null,
+            'ai_credit_balance_after' => $transaction?->balance_after,
         ]);
 
         return response()->json(['ok' => true]);
