@@ -71,6 +71,17 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
+            // Whichever process (php-fpm as www-data, or a supervised
+            // artisan command as deploy - both in the same www-data group
+            // in production) rotates in a fresh daily file first creates it
+            // with this mode. Without this, PHP's default umask left new
+            // files at 644 (group read-only), so the OTHER user's
+            // processes got "Permission denied" the instant they tried to
+            // log anything - confirmed live: telephony:watch-voip-push
+            // silently lost its own error logging (including the log line
+            // for a real ESL disconnect) because deploy couldn't append to
+            // a file www-data had created that day.
+            'permission' => 0664,
         ],
 
         'slack' => [
