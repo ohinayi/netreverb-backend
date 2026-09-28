@@ -137,6 +137,12 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(90)->by('message-translate-ip:'.$request->ip()),
         ]);
 
+        // Keyed by the API key's id, not a User - AuthenticatePartnerApiKey
+        // runs before this limiter in the route's middleware list, so
+        // partner_api_key is always set by the time this callback fires.
+        RateLimiter::for('partner-api', fn (Request $request): Limit => Limit::perMinute(60)
+            ->by('partner-api-key:'.($request->attributes->get('partner_api_key')?->id ?? $request->ip())));
+
         VerifyEmail::createUrlUsing(function (object $notifiable): string {
             $verificationUrl = URL::temporarySignedRoute(
                 'verification.verify',

@@ -40,6 +40,16 @@ class OrganizationPolicy
         return $this->canManageWorkspaceFeature($user, $organization);
     }
 
+    /**
+     * Issuing a credential that can read every call log in the org is
+     * higher-trust than telephony config, and a partner integration is an
+     * org-level concept - Owner/Admin only, no personal workspaces.
+     */
+    public function manageApiKeys(User $user, Organization $organization): bool
+    {
+        return $this->canManage($user, $organization);
+    }
+
     private function canManageWorkspaceFeature(User $user, Organization $organization): bool
     {
         if ($user->isSuperAdmin()) {

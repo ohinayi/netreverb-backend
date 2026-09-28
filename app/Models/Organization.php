@@ -113,6 +113,11 @@ class Organization extends Model
         return $this->hasMany(CallLog::class);
     }
 
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(OrganizationApiKey::class);
+    }
+
     public function voicemails(): HasMany
     {
         return $this->hasMany(Voicemail::class);

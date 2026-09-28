@@ -34,15 +34,16 @@ use App\Http\Controllers\Api\V1\MessageRequestController;
 use App\Http\Controllers\Api\V1\MessageTranslationController;
 use App\Http\Controllers\Api\V1\Mobile\DeviceTokenController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\OrganizationApiKeyController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OrganizationIvrController;
 use App\Http\Controllers\Api\V1\OrganizationRingbackAdController;
 use App\Http\Controllers\Api\V1\OutboundCampaignController;
 use App\Http\Controllers\Api\V1\OutboundDeliveryWebhookController;
 use App\Http\Controllers\Api\V1\OutboundMessagingController;
+use App\Http\Controllers\Api\V1\Partner\CallLogController as PartnerCallLogController;
 use App\Http\Controllers\Api\V1\PaymentWebhookController;
 use App\Http\Controllers\Api\V1\RecordingController;
-use App\Http\Controllers\Api\V1\VoicemailController;
 use App\Http\Controllers\Api\V1\ServiceNumberController;
 use App\Http\Controllers\Api\V1\SipCredentialController;
 use App\Http\Controllers\Api\V1\SipRegistrationController;
@@ -54,12 +55,14 @@ use App\Http\Controllers\Api\V1\SuperAdminPricingGroupsController;
 use App\Http\Controllers\Api\V1\SuperAdminRingbackAdsController;
 use App\Http\Controllers\Api\V1\SuperAdminSmsController;
 use App\Http\Controllers\Api\V1\TicketController;
+use App\Http\Controllers\Api\V1\VoicemailController;
 use App\Http\Controllers\Api\V1\WebRtcBootstrapController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\FreeSwitchCallcenterConfigurationController;
 use App\Http\Controllers\FreeSwitchDialplanController;
 use App\Http\Controllers\FreeSwitchDialplanRouterController;
 use App\Http\Controllers\RealtimeBridgeSessionController;
+use App\Http\Middleware\AuthenticatePartnerApiKey;
 use App\Http\Resources\Api\V1\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
@@ -111,6 +114,18 @@ Route::prefix('v1')->group(function (): void {
     Route::get('email/verify-required', fn () => response()->json([
         'message' => 'Email verification is required.',
     ], 403))->name('verification.notice');
+
+    // Public partner API - authenticated by AuthenticatePartnerApiKey
+    // (bearer API key, org-level), NOT Sanctum/session. Deliberately a
+    // sibling of, not nested inside, the auth:sanctum group below -
+    // StartSession is session-cookie machinery that has no meaning for a
+    // server-to-server partner request.
+    Route::prefix('partner')->middleware([AuthenticatePartnerApiKey::class, 'throttle:partner-api'])->group(function (): void {
+        Route::get('call-logs', [PartnerCallLogController::class, 'index'])
+            ->name('partner.call-logs.index');
+        Route::get('call-logs/{callLog}', [PartnerCallLogController::class, 'show'])
+            ->name('partner.call-logs.show');
+    });
 
     Route::middleware([StartSession::class, 'auth:sanctum', 'throttle:120,1'])->group(function (): void {
         Route::get('/me', fn (Request $request) => UserResource::make(
@@ -257,6 +272,12 @@ Route::prefix('v1')->group(function (): void {
                 Route::apiResource('organizations.extensions', ExtensionController::class);
                 Route::get('organizations/{organization}/audit-events', [AuditEventController::class, 'index'])
                     ->name('organizations.audit-events.index');
+                Route::get('organizations/{organization}/api-keys', [OrganizationApiKeyController::class, 'index'])
+                    ->name('organizations.api-keys.index');
+                Route::post('organizations/{organization}/api-keys', [OrganizationApiKeyController::class, 'store'])
+                    ->name('organizations.api-keys.store');
+                Route::delete('organizations/{organization}/api-keys/{apiKey}', [OrganizationApiKeyController::class, 'destroy'])
+                    ->name('organizations.api-keys.destroy');
                 Route::apiResource('organizations.call-queues', CallQueueController::class)
                     ->only(['index', 'store', 'update', 'destroy'])
                     ->parameters(['call-queues' => 'callQueue']);

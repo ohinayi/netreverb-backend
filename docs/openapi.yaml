@@ -16,6 +16,15 @@ tags:
   - name: Organizations
   - name: Extensions
   - name: Service Numbers
+  - name: Partner API
+    description: |
+      Public, read-only API for third-party integrations. Authenticated by a
+      per-organization API key (`Authorization: Bearer nrb_live_...`), not
+      Sanctum - a partner request has no NetReverb user, it authenticates as
+      the organization itself. Keys are issued and revoked by an org
+      Owner/Admin via the Organizations > API Keys endpoints below (those
+      themselves use normal Sanctum auth, since that's the org admin using
+      the web app, not a partner request).
 paths:
   /auth/register:
     post:
@@ -470,12 +479,143 @@ paths:
       responses:
         '204':
           description: Deleted
+  /organizations/{organization}/api-keys:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organizations]
+      operationId: listApiKeys
+      summary: List the organization's partner API keys (Owner/Admin only)
+      responses:
+        '200':
+          description: API keys - never includes the secret, only the identifying prefix
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrganizationApiKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Organizations]
+      operationId: createApiKey
+      summary: Create a partner API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Created; the plaintext `key` is returned exactly once and never shown again
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: nrb_live_ab12cd34ef56gh78ij90kl12mn34op56qr78st90
+                  data:
+                    $ref: '#/components/schemas/OrganizationApiKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /organizations/{organization}/api-keys/{apiKey}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: apiKey
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Organizations]
+      operationId: revokeApiKey
+      summary: Revoke a partner API key (soft revoke, not deleted - stops working immediately)
+      responses:
+        '200':
+          description: Revoked
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /partner/call-logs:
+    get:
+      tags: [Partner API]
+      operationId: partnerListCallLogs
+      summary: List call logs for the authenticated organization
+      security:
+        - partnerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated call logs, scoped to the API key's organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PartnerCallLog'
+        '401':
+          description: Missing, malformed, revoked, or expired API key
+        '429':
+          description: Rate limit exceeded (60 requests/minute per key)
+  /partner/call-logs/{callLog}:
+    get:
+      tags: [Partner API]
+      operationId: partnerGetCallLog
+      summary: Get a call log by id
+      security:
+        - partnerApiKey: []
+      parameters:
+        - name: callLog
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Call log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PartnerCallLog'
+        '401':
+          description: Missing, malformed, revoked, or expired API key
+        '404':
+          description: Not found, or belongs to a different organization than the API key
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: Sanctum
+    partnerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: nrb_live_...
+      description: |
+        A per-organization API key created via
+        POST /organizations/{organization}/api-keys. The plaintext is shown
+        exactly once, at creation.
   parameters:
     Page:
       name: page
@@ -546,6 +686,97 @@ components:
           schema:
             $ref: '#/components/schemas/MessageResponse'
   schemas:
+    OrganizationApiKey:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        key_prefix:
+          type: string
+          description: First ~16 chars of the plaintext, for identification only - never usable for auth
+        abilities:
+          type: array
+          items:
+            type: string
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    PartnerCallLog:
+      type: object
+      description: Read-only. Same shape as the first-party call log, minus fields that require session/Sanctum auth to act on (recording upload/playback URLs) - recording metadata only.
+      properties:
+        id:
+          type: string
+        caller_number:
+          type: string
+        callee_number:
+          type: string
+        status:
+          type: string
+        media_type:
+          type: string
+        session_type:
+          type: string
+        direction:
+          type: string
+        party_status:
+          type: string
+        is_missed:
+          type: boolean
+        is_answered:
+          type: boolean
+        duration:
+          type: integer
+        recording:
+          type: object
+          nullable: true
+          properties:
+            duration:
+              type: integer
+              nullable: true
+            size:
+              type: integer
+              nullable: true
+            status:
+              type: string
+            media_type:
+              type: string
+            container:
+              type: string
+              nullable: true
+            file_name:
+              type: string
+              nullable: true
+            playback_available:
+              type: boolean
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     RegisterRequest:
       type: object
       required:
