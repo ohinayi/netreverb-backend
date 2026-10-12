@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Public\LisaChatController;
 use App\Http\Controllers\Api\V1\AiAssistantController;
 use App\Http\Controllers\Api\V1\AiCreditWalletController;
 use App\Http\Controllers\Api\V1\AuditEventController;
@@ -116,6 +117,11 @@ Route::prefix('v1')->group(function (): void {
     Route::get('email/verify-required', fn () => response()->json([
         'message' => 'Email verification is required.',
     ], 403))->name('verification.notice');
+
+    // Public marketing-site chat widget ("Lisa") - unauthenticated, IP-throttled.
+    Route::post('public/lisa/chat', [LisaChatController::class, 'send'])
+        ->middleware('throttle:lisa-chat')
+        ->name('public.lisa.chat');
 
     // Public partner API - authenticated by AuthenticatePartnerApiKey
     // (bearer API key, org-level), NOT Sanctum/session. Deliberately a

@@ -9,6 +9,7 @@ use App\Models\AiAssistant;
 use App\Models\AiAssistantField;
 use App\Models\AiAssistantSession;
 use App\Models\AiUsageRecord;
+use App\Services\Ai\AiAssistantInstructionGuard;
 use App\Services\Ai\AiAssistantPromptSynthesizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -624,7 +625,7 @@ class AiAssistantCallFlow
     private function instructionFor(AiAssistant $assistant): string
     {
         return implode("\n\n", array_filter([
-            $assistant->system_instruction,
+            AiAssistantInstructionGuard::forExtraction($assistant),
             'Extract only the value for the field described below from the caller\'s spoken answer. Treat the answer as the only source of truth - never guess, invent a value, or correct noisy speech. Use null if the value was not clearly spoken.',
         ]));
     }

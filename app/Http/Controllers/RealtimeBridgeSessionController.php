@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiAssistantResponseMode;
 use App\Models\AiAssistantSession;
+use App\Services\Ai\AiAssistantInstructionGuard;
 use App\Services\Ai\AiCreditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +29,7 @@ class RealtimeBridgeSessionController extends Controller
         $this->authorizeBridgeRequest($request);
 
         $session = AiAssistantSession::query()
-            ->with('assistant')
+            ->with('assistant.organization')
             ->where('bridge_session_token', $token)
             ->where('status', 'in_progress')
             ->where('mode', AiAssistantResponseMode::SpeechToSpeech->value)
@@ -41,7 +42,7 @@ class RealtimeBridgeSessionController extends Controller
         return response()->json([
             'session' => ['id' => $session->public_id],
             'assistant' => [
-                'system_instruction' => $assistant->system_instruction,
+                'system_instruction' => AiAssistantInstructionGuard::forConversation($assistant),
                 'welcome_message' => $assistant->welcome_message,
                 // Fixed to English for v1 - see AiAssistantRealtimeCallFlow's
                 // docblock and the project plan for why this is deliberately

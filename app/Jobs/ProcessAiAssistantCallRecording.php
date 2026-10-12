@@ -8,6 +8,7 @@ use App\Models\AiAssistant;
 use App\Models\AiAssistantSession;
 use App\Models\AiUsageRecord;
 use App\Models\CallLog;
+use App\Services\Ai\AiAssistantInstructionGuard;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -161,7 +162,7 @@ class ProcessAiAssistantCallRecording implements ShouldQueue
     private function instruction(AiAssistant $assistant): string
     {
         return implode("\n\n", array_filter([
-            $assistant->system_instruction,
+            AiAssistantInstructionGuard::forExtraction($assistant),
             'Treat the transcript as the only source of truth. Extract a field only when its value was clearly spoken. Never guess, correct noisy speech, invent a value, or use placeholders such as "unknown". Use null for anything missing, unclear, partial, or uncertain. A summary must contain only facts clearly stated in the transcript; otherwise use null.',
         ]));
     }

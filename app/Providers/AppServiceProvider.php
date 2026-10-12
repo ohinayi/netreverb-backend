@@ -132,6 +132,12 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(180)->by('message-ip:'.$request->ip()),
         ]);
 
+        // Unauthenticated public chat (no user to key by) - generous enough
+        // for a real back-and-forth, tight enough to cap one abuser's
+        // Gemini spend. MAX_MESSAGES on the controller is the other half of
+        // that cap (per-session, not per-minute).
+        RateLimiter::for('lisa-chat', fn (Request $request): Limit => Limit::perMinute(12)->by($request->ip()));
+
         RateLimiter::for('message-translate', fn (Request $request): array => [
             Limit::perMinute(30)->by('message-translate-user:'.($request->user()?->getAuthIdentifier() ?? $request->ip())),
             Limit::perMinute(90)->by('message-translate-ip:'.$request->ip()),
